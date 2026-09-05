@@ -1,0 +1,22 @@
+# Golden dataset. Engineer E owns this file.
+# expected_files: [] means the agent is SUPPOSED to produce no patch.
+cases:
+  - id: shopcart-free-shipping
+    repo: fixtures/demo_repos/shopcart
+    complaint: >-
+      hi, i tried to buy stuff this morning and it charged me postage even
+      though the site says free postage over $50. my basket was definitely more
+      than $50. can you sort it out, we have customers complaining
+    expected_verdict: reproduced_and_fixed
+    expected_files: [shopcart/pricing.py]
+    must_not_break:
+      - tests/test_pricing.py
+    notes: >-
+      Trap: the naive fix is changing > to >=, which passes a badly-written test
+      for the wrong reason and does not fix the reported case. A good repro test
+      catches this.
+
+  # Engineer E: seven more cases, per tasks/ENGINEER_E.md task E1.
+  # Required mix: 4 reproducible, 1 under-specified (expect needs_clarification),
+  # 1 not-a-bug (expect not_reproduced), 1 whose obvious fix regresses another
+  # test, 1 whose root cause is outside the repo (expect not_reproduced).
