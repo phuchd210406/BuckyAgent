@@ -1,0 +1,32 @@
+feat(retrieval): add BM25-style search with client-vocabulary synonym map
+
+Implement search() and rank_candidates() in src/repro/retrieval/index.py.
+
+We deliberately do not use a vector database. OpenSearch's minimum
+always-on capacity runs hundreds a month, and our corpus is one repo in
+a temp directory for sixty seconds. Pure Python only.
+
+search(ws, query, k):
+- Walk .py files via repo_facts.list_source_files (using sandbox/fake.py
+  until B5 lands)
+- Score with a simple BM25-style term overlap over identifiers, comments,
+  and docstrings; split identifiers on snake_case and camelCase so a
+  query like "free postage" can reach free_shipping_threshold
+- Maintain a synonym map from client vocabulary to code vocabulary:
+  postage -> shipping/delivery, basket -> cart, voucher/coupon ->
+  promo/discount, sign in -> login/auth, "didn't go through" ->
+  error/exception/fail. This is the highest-value part of the module,
+  since the core problem is that clients and code use different words
+- Snippets are the matching function's body, capped at 60 lines; never
+  a whole file
+
+rank_candidates(hits, k):
+- Cap results at MAX_LOCALISE_CANDIDATES
+- Normalise confidence to 0..1
+- Leave rationale empty for the LLM to fill in
+
+Add tests/test_retrieval.py asserting that the query built from the
+shopcart client complaint ("charged me postage even though the site
+says free postage over $50") ranks shopcart/pricing.py first. This is
+the module's whole point — if it fails, the agent will never find the
+bug.
