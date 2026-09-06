@@ -14,11 +14,11 @@ workspace, real pytest, real patcher -- and writes:
 TWO THINGS THAT DECIDE WHETHER A CASSETTE IS EVER FOUND AGAIN, both learned the
 hard way, both about the fact that a cassette key is a hash of the exact prompt:
 
-  * `received_at`. ClientReport stamps it with `now()` by default, and it is
-    rendered into the intake prompt. Recorded at 11:04 and replayed at 11:05,
-    every key differs and every lookup misses. So it is PINNED here, derived
-    from the case id, and the full report is written to recorded_runs.json so a
-    replay reconstructs exactly the report that was recorded.
+  * `received_at`. ClientReport stamps it with `now()` by default. Engineer A
+    now strips it and `run_id` from every prompt (`agents._common`,
+    VOLATILE_REPORT_FIELDS) so they no longer reach a key, but it is still
+    PINNED here so the manifest is reproducible, and the full report is written
+    to recorded_runs.json so a replay reconstructs what was recorded.
   * `repo_path`. It is rendered into the prompt too, so an absolute path bakes
     THIS machine's checkout directory into every key and the cassettes stop
     working the moment someone else clones the repo somewhere else. The dataset's

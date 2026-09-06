@@ -1,0 +1,12 @@
+{
+  "raw_text": "```json\n{\n  \"observed_behaviour\": \"charged postage fee despite basket total exceeding $50 and site stating free postage over $50\",\n  \"expected_behaviour\": \"no postage charge should apply\",\n  \"steps\": [\n    \"attempted to purchase items\",\n    \"basket total was over $50\"\n  ],\n  \"entrypoint_hint\": \"checkout\",\n  \"environment\": null,\n  \"missing\": [\n    \"expected_behaviour\"\n  ],\n  \"confidence\": 0.72\n}\n```",
+  "schema": "ReportFacts",
+  "stop_reason": "end_turn",
+  "text": "{\"observed_behaviour\":\"charged postage fee despite basket total exceeding $50 and site stating free postage over $50\",\"expected_behaviour\":\"no postage charge should apply\",\"steps\":[\"attempted to purchase items\",\"basket total was over $50\"],\"entrypoint_hint\":\"checkout\",\"environment\":null,\"missing\":[\"expected_behaviour\"],\"confidence\":0.72}",
+  "usage": {
+    "calls": 1,
+    "input_tokens": 803,
+    "output_tokens": 127,
+    "usd": 0.001438
+  }
+}
