@@ -1,0 +1,97 @@
+{
+  "run_id": "leaderboard-tied-points",
+  "contract_version": "1.0.0",
+  "report": {
+    "run_id": "leaderboard-tied-points",
+    "raw_text": "the weekly board is putting people in the wrong order. me and dave finished on the same points this week and he's shown above me, but when me and adam tied last month i was the one on top. so it's not alphabetical and it's not whoever scored first either. the points themselves are all correct, it's just the order they come out in. a few of the lads have noticed and it makes the whole thing look made up",
+    "channel": "email",
+    "reporter_name": null,
+    "repo_path": "fixtures/demo_repos/leaderboard",
+    "received_at": "2026-01-01T00:00:00Z"
+  },
+  "facts": {
+    "observed_behaviour": "as reported",
+    "expected_behaviour": null,
+    "steps": [],
+    "entrypoint_hint": null,
+    "environment": null,
+    "missing": [],
+    "confidence": 0.8
+  },
+  "questions": [],
+  "hypotheses": [
+    {
+      "file_path": "leaderboard/standings.py",
+      "symbol": "rank",
+      "rationale": "Client's words map to this code.",
+      "confidence": 0.7
+    }
+  ],
+  "repro_attempts": [
+    {
+      "attempt_no": 1,
+      "test": {
+        "path": "tests/test_repro_client_issue.py",
+        "source": "def test_repro():\n    assert False\n"
+      },
+      "result": {
+        "exit_code": 1,
+        "stdout_tail": "1 failed, 0 passed",
+        "stderr_tail": "",
+        "duration_s": 0.4,
+        "timed_out": false,
+        "passed": 0,
+        "failed": 1,
+        "errors": 0
+      },
+      "reproduced": true,
+      "reasoning": "Fails with exactly the behaviour the client described."
+    }
+  ],
+  "fix_attempts": [
+    {
+      "attempt_no": 1,
+      "patch": {
+        "unified_diff": "--- a/leaderboard/standings.py\n+++ b/leaderboard/standings.py\n@@\n-    old\n+    new\n",
+        "files_touched": [
+          "leaderboard/standings.py"
+        ],
+        "rationale": "Root cause in the named function. Minimal change."
+      },
+      "target_test": {
+        "exit_code": 0,
+        "stdout_tail": "1 passed",
+        "stderr_tail": "",
+        "duration_s": 0.4,
+        "timed_out": false,
+        "passed": 1,
+        "failed": 0,
+        "errors": 0
+      },
+      "suite": {
+        "exit_code": 0,
+        "stdout_tail": "6 passed",
+        "stderr_tail": "",
+        "duration_s": 0.4,
+        "timed_out": false,
+        "passed": 6,
+        "failed": 0,
+        "errors": 0
+      },
+      "accepted": true,
+      "reasoning": "Repro test green, pre-existing suite green."
+    }
+  ],
+  "verdict": "reproduced_and_fixed",
+  "handover": {
+    "dev_summary": "Fix in `leaderboard/standings.py`.",
+    "client_reply": "We reproduced what you described and fixed it."
+  },
+  "usage": {
+    "input_tokens": 9000,
+    "output_tokens": 1400,
+    "calls": 7,
+    "usd": 0.0127
+  },
+  "wall_clock_s": 41.2
+}

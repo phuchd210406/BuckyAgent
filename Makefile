@@ -1,4 +1,4 @@
-.PHONY: install test test-fast lint lint-fix check-bedrock demo run eval record api serve web
+.PHONY: install test test-fast lint lint-fix check-bedrock demo run eval eval-fixtures eval-live record api serve web
 
 # --- how these recipes find Python -----------------------------------------
 # Recipes run under /bin/sh with whatever PATH you happen to have. Two traps
@@ -51,8 +51,16 @@ endif
 record:                   ## Re-record cassettes against real Bedrock (COSTS MONEY)
 	REPRO_RECORD=1 LLM_PROVIDER=bedrock $(PY) scripts/record_cassettes.py
 
-eval:
+eval:                     ## Score the golden dataset by RUNNING the agent (free, replayed)
 	LLM_PROVIDER=fake $(PY) eval/run_eval.py --dataset eval/dataset.yaml
+
+eval-fixtures:            ## Score committed RunRecords instead of running the agent.
+                          ## No model, no sandbox, no cassettes -- this is what CI runs,
+                          ## and what proves the HARNESS works when a run cannot.
+	$(PY) eval/run_eval.py --dataset eval/dataset.yaml --records eval/fixtures
+
+eval-live:                ## The golden dataset against real Bedrock. COSTS MONEY.
+	$(PY) eval/run_eval.py --dataset eval/dataset.yaml --live
 
 api:                      ## The backend the web UI talks to, on :8000
 	$(PY) -m uvicorn repro.api.main:app --reload --port 8000

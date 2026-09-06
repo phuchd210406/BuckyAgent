@@ -1,0 +1,97 @@
+{
+  "run_id": "expenses-penny-short",
+  "contract_version": "1.0.0",
+  "report": {
+    "run_id": "expenses-penny-short",
+    "raw_text": "we use this for the team lunch every friday and the kitty never quite adds up. we're a few pence short most weeks and by the end of the month it's noticeable enough that people have started joking about it. nobody is stealing it before you ask. might have started when we switched to the new place that does the wraps",
+    "channel": "email",
+    "reporter_name": null,
+    "repo_path": "fixtures/demo_repos/expenses",
+    "received_at": "2026-01-01T00:00:00Z"
+  },
+  "facts": {
+    "observed_behaviour": "as reported",
+    "expected_behaviour": null,
+    "steps": [],
+    "entrypoint_hint": null,
+    "environment": null,
+    "missing": [],
+    "confidence": 0.8
+  },
+  "questions": [],
+  "hypotheses": [
+    {
+      "file_path": "expenses/split.py",
+      "symbol": "split_evenly",
+      "rationale": "Client's words map to this code.",
+      "confidence": 0.7
+    }
+  ],
+  "repro_attempts": [
+    {
+      "attempt_no": 1,
+      "test": {
+        "path": "tests/test_repro_client_issue.py",
+        "source": "def test_repro():\n    assert False\n"
+      },
+      "result": {
+        "exit_code": 1,
+        "stdout_tail": "1 failed, 0 passed",
+        "stderr_tail": "",
+        "duration_s": 0.4,
+        "timed_out": false,
+        "passed": 0,
+        "failed": 1,
+        "errors": 0
+      },
+      "reproduced": true,
+      "reasoning": "Fails with exactly the behaviour the client described."
+    }
+  ],
+  "fix_attempts": [
+    {
+      "attempt_no": 1,
+      "patch": {
+        "unified_diff": "--- a/expenses/split.py\n+++ b/expenses/split.py\n@@\n-    old\n+    new\n",
+        "files_touched": [
+          "expenses/split.py"
+        ],
+        "rationale": "Root cause in the named function. Minimal change."
+      },
+      "target_test": {
+        "exit_code": 0,
+        "stdout_tail": "1 passed",
+        "stderr_tail": "",
+        "duration_s": 0.4,
+        "timed_out": false,
+        "passed": 1,
+        "failed": 0,
+        "errors": 0
+      },
+      "suite": {
+        "exit_code": 0,
+        "stdout_tail": "8 passed",
+        "stderr_tail": "",
+        "duration_s": 0.4,
+        "timed_out": false,
+        "passed": 8,
+        "failed": 0,
+        "errors": 0
+      },
+      "accepted": true,
+      "reasoning": "Repro test green, pre-existing suite green."
+    }
+  ],
+  "verdict": "reproduced_and_fixed",
+  "handover": {
+    "dev_summary": "Fix in `expenses/split.py`.",
+    "client_reply": "We reproduced what you described and fixed it."
+  },
+  "usage": {
+    "input_tokens": 9000,
+    "output_tokens": 1400,
+    "calls": 7,
+    "usd": 0.0118
+  },
+  "wall_clock_s": 41.2
+}

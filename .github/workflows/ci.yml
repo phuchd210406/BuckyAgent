@@ -14,3 +14,9 @@ jobs:
         env:
           LLM_PROVIDER: fake
         run: pytest -q
+      # The safety property, asserted on every push. Exits 2 on a false fix or
+      # a record that violates its own invariants, and a non-zero exit fails
+      # the PR. Scores committed RunRecords rather than running the agent, so
+      # it needs no model and cannot flake on a cassette.
+      - name: Golden dataset (eval/run_eval.py — false-fix rate must be 0)
+        run: python eval/run_eval.py --dataset eval/dataset.yaml --records eval/fixtures

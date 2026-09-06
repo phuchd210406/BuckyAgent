@@ -1,0 +1,47 @@
+{
+  "run_id": "notekeeper-underspecified",
+  "contract_version": "1.0.0",
+  "report": {
+    "run_id": "notekeeper-underspecified",
+    "raw_text": "it's broken, please fix",
+    "channel": "email",
+    "reporter_name": null,
+    "repo_path": "fixtures/demo_repos/notekeeper",
+    "received_at": "2026-01-01T00:00:00Z"
+  },
+  "facts": {
+    "observed_behaviour": null,
+    "expected_behaviour": null,
+    "steps": [],
+    "entrypoint_hint": null,
+    "environment": null,
+    "missing": [
+      "observed_behaviour",
+      "steps",
+      "entrypoint_hint"
+    ],
+    "confidence": 0.2
+  },
+  "questions": [
+    {
+      "question": "What were you trying to do when it went wrong?",
+      "why_it_matters": "Nothing in the message names a screen or an action.",
+      "unblocks_field": "observed_behaviour"
+    }
+  ],
+  "hypotheses": [],
+  "repro_attempts": [],
+  "fix_attempts": [],
+  "verdict": "needs_clarification",
+  "handover": {
+    "dev_summary": "Not actionable yet: no observed behaviour.",
+    "client_reply": "Sorry about that. Could you tell us what you were doing when it went wrong?"
+  },
+  "usage": {
+    "input_tokens": 1800,
+    "output_tokens": 260,
+    "calls": 2,
+    "usd": 0.0031
+  },
+  "wall_clock_s": 6.4
+}
