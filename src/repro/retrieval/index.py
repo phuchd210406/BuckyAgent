@@ -328,27 +328,58 @@ def _is_test_path(rel_path: str) -> bool:
     return any(p in _TEST_MARKERS for p in parts[:-1]) or name.startswith("test_") or name.endswith("_test")
 
 
+def _self_listing(ws: Workspace) -> list[str] | None:
+    """Paths a workspace can enumerate itself, or None if it cannot.
+
+    `sandbox.fake.FakeWorkspace` holds its files in a dict and has no tree on
+    disk, so walking `ws.path` finds nothing there. Without this, every search
+    against the fake returns [] SILENTLY, and a graph test written against it is
+    green while saying nothing about the real system.
+
+    Duck-typed rather than imported: retrieval must not depend on a test double.
+    """
+    written = getattr(ws, "written_files", None)
+    if not callable(written):
+        return None
+    try:
+        return sorted(written())
+    except (TypeError, RuntimeError):
+        return None
+
+
 def list_source_files(ws: Workspace, max_files: int = MAX_FILES) -> list[str]:
     """Repo-relative .py paths, tests excluded, sorted, capped.
 
-    Engineer B's `repo_facts.list_source_files` (task B5) is the real one and is
-    preferred the moment it lands; this is the same contract so that swapping it
-    in changes nothing here. Falls back rather than failing, because the
-    localiser must work before hour 16.
+    Three sources, in order of authority:
+
+    1. a workspace that can enumerate ITSELF. For an in-memory workspace that is
+       the only truth there is, and it has to win over any walk of `ws.path`,
+       B5's included -- both walk a directory that does not exist and return [].
+    2. Engineer B's `repo_facts.list_source_files` (task B5), the real one for a
+       real repo. Same contract, so swapping it in changes nothing here.
+    3. this module's own walk, for before B5 landed.
+
+    Falls back rather than failing at every step: the localiser must keep working.
     """
-    try:
-        from repro.sandbox.repo_facts import list_source_files as b5
+    names = _self_listing(ws)
 
-        return list(b5(ws, max_files=max_files))
-    except (ImportError, AttributeError, NotImplementedError):
-        pass
+    if names is None:
+        try:
+            from repro.sandbox.repo_facts import list_source_files as b5
 
-    root = Path(ws.path)
+            return list(b5(ws, max_files=max_files))
+        except (ImportError, AttributeError, NotImplementedError):
+            pass
+
+        root = Path(ws.path)
+        names = sorted(path.relative_to(root).as_posix() for path in root.rglob("*.py"))
+
     found: list[str] = []
-    for path in sorted(root.rglob("*.py")):
-        if any(part in _SKIP_DIRS for part in path.relative_to(root).parts):
+    for rel in names:
+        if not rel.endswith(".py"):
             continue
-        rel = path.relative_to(root).as_posix()
+        if any(part in _SKIP_DIRS for part in Path(rel).parts):
+            continue
         if _is_test_path(rel):
             continue
         found.append(rel)
@@ -359,11 +390,23 @@ def _read(ws: Workspace, rel_path: str) -> str | None:
     """Source text, or None for anything we should not or cannot index."""
     try:
         target = ws.resolve_path(rel_path)
-        if not target.is_file() or target.stat().st_size > MAX_FILE_BYTES:
-            return None
-        return target.read_text(encoding="utf-8", errors="replace")
-    except (ValueError, OSError, RuntimeError):
+    except (ValueError, RuntimeError):
+        return None
+
+    try:
+        if target.is_file():
+            if target.stat().st_size > MAX_FILE_BYTES:
+                return None
+            return target.read_text(encoding="utf-8", errors="replace")
+    except OSError:
         # An unreadable file is one fewer candidate, not a failed run.
+        return None
+
+    # Nothing on disk. An in-memory workspace still serves it through the
+    # Workspace API, which is the surface both of them are guaranteed to share.
+    try:
+        return ws.read_file(rel_path, max_chars=MAX_FILE_BYTES)
+    except (AttributeError, OSError, ValueError, RuntimeError):
         return None
 
 

@@ -1,0 +1,24 @@
+{
+  "model_id": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+  "recorded_at": "2026-01-01T00:00:00+00:00",
+  "region": "us-east-1",
+  "runs": [
+    {
+      "accepted_patches": [],
+      "case_id": "shopcart-free-shipping",
+      "error": null,
+      "expected_verdict": "reproduced_and_fixed",
+      "report": {
+        "channel": "email",
+        "raw_text": "hi, i tried to buy stuff this morning and it charged me postage even though the site says free postage over $50. my basket was definitely more than $50. can you sort it out, we have customers complaining",
+        "received_at": "2026-01-01T00:00:00Z",
+        "repo_path": "fixtures/demo_repos/shopcart",
+        "reporter_name": null,
+        "run_id": "shopcart-free-shipping"
+      },
+      "usd": 0.002482,
+      "verdict": "needs_clarification"
+    }
+  ],
+  "total_usd": 0.002482
+}

@@ -9,6 +9,7 @@ small or the competition was excluded.
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,7 @@ from repro.retrieval.index import (
     search,
     split_identifier,
 )
+from repro.sandbox.fake import FakeWorkspace
 from repro.sandbox.workspace import Workspace
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -371,3 +373,75 @@ def test_duplicate_file_and_symbol_pairs_are_dropped():
 
 def test_zero_scored_hits_are_not_candidates():
     assert rank_candidates([("a.py", "def a(): pass", 0.0)], 5) == []
+
+
+# ---------------------------------------------------------------------------
+# In-memory workspaces
+#
+# FakeWorkspace (task B4) holds its files in a dict and has no tree on disk, so
+# anything that walks `ws.path` -- this module's own fallback and B5's
+# repo_facts alike -- finds nothing and returns [] without raising. A graph test
+# written against the fake would then see the localiser retrieve NOTHING, pass,
+# and say nothing at all about the system that ships.
+# ---------------------------------------------------------------------------
+
+
+def fake_shopcart() -> FakeWorkspace:
+    ws = FakeWorkspace()
+    ws.write_file("shopcart/pricing.py", (SHOPCART / "shopcart" / "pricing.py").read_text())
+    ws.write_file("shopcart/__init__.py", "")
+    ws.write_file("tests/test_pricing.py", (SHOPCART / "tests" / "test_pricing.py").read_text())
+    return ws
+
+
+def test_search_finds_files_written_to_an_in_memory_workspace():
+    hits = search(fake_shopcart(), COMPLAINT, k=5)
+
+    assert hits, "an in-memory workspace retrieved nothing at all"
+    assert hits[0][0] == "shopcart/pricing.py"
+    assert hits[0][1].startswith("def shipping_for(")
+
+
+def test_a_fake_workspace_and_a_real_one_return_identical_hits(shopcart):
+    """The parity that matters for retrieval: same files in, same ranking out.
+
+    tests/test_fake_parity.py pins FakeWorkspace to Workspace's own API. This
+    pins what this module MAKES of them, which is the part a localiser test
+    actually asserts on.
+    """
+    real = search(shopcart, COMPLAINT, k=5)
+    fake = search(fake_shopcart(), COMPLAINT, k=5)
+
+    assert [path for path, _, _ in fake] == [path for path, _, _ in real]
+    assert [snippet for _, snippet, _ in fake] == [snippet for _, snippet, _ in real]
+
+
+def test_candidates_from_an_in_memory_workspace_name_the_buggy_symbol():
+    candidates = rank_candidates(search(fake_shopcart(), COMPLAINT, k=5), MAX_LOCALISE_CANDIDATES)
+
+    assert candidates[0].file_path == "shopcart/pricing.py"
+    assert candidates[0].symbol == "shipping_for"
+
+
+def test_an_in_memory_listing_still_excludes_tests():
+    assert list_source_files(fake_shopcart()) == ["shopcart/__init__.py", "shopcart/pricing.py"]
+
+
+def test_an_empty_in_memory_workspace_returns_nothing():
+    assert list_source_files(FakeWorkspace()) == []
+    assert search(FakeWorkspace(), COMPLAINT, k=5) == []
+
+
+def test_a_workspaces_own_listing_wins_over_a_disk_walk(monkeypatch):
+    """B5 walks `ws.path` too, so for an in-memory workspace it also finds [].
+
+    The workspace's own account of its contents is the only truth there is for
+    one, so it has to be consulted before either walk.
+    """
+    import types
+
+    module = types.ModuleType("repro.sandbox.repo_facts")
+    module.list_source_files = lambda ws, max_files=300: ["never/used.py"]
+    monkeypatch.setitem(sys.modules, "repro.sandbox.repo_facts", module)
+
+    assert list_source_files(fake_shopcart()) == ["shopcart/__init__.py", "shopcart/pricing.py"]

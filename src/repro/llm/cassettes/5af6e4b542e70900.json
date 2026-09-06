@@ -1,0 +1,12 @@
+{
+  "raw_text": "```json\n{\n  \"question\": \"What was the exact total shown in your basket before you paid\u2014do you remember the amount?\",\n  \"why_it_matters\": \"We need to confirm the basket was actually over $50 to rule out a display or calculation error on our end.\",\n  \"unblocks_field\": \"expected_behaviour\"\n}\n```",
+  "schema": "ClarifyingQuestion",
+  "stop_reason": "end_turn",
+  "text": "{\"question\":\"What was the exact total shown in your basket before you paid\u2014do you remember the amount?\",\"why_it_matters\":\"We need to confirm the basket was actually over $50 to rule out a display or calculation error on our end.\",\"unblocks_field\":\"expected_behaviour\"}",
+  "usage": {
+    "calls": 1,
+    "input_tokens": 630,
+    "output_tokens": 85,
+    "usd": 0.001055
+  }
+}

@@ -31,6 +31,7 @@ from pydantic import BaseModel, ValidationError
 
 from repro.contracts import LLMResponse, TokenUsage
 from repro.llm.base import SchemaValidationError
+from repro.llm.budget import BudgetGuard, estimate_call_usd, session_guard
 from repro.llm.fake import cassette_key
 from repro.settings import settings, usd_for
 
@@ -151,6 +152,7 @@ class BedrockLLM:
         backoff_base_s: float = BACKOFF_BASE_S,
         sleep: Callable[[float], None] = time.sleep,
         temperature: float = 0.0,
+        budget: BudgetGuard | None = None,
     ) -> None:
         cfg = settings()
         self.model_id = model_id or cfg.model_id
@@ -161,11 +163,14 @@ class BedrockLLM:
         self._sleep = sleep
         self._client = client if client is not None else self._make_client()
 
+        # This run's cap. It is the ACCOUNTANT as well as the gate, so there is
+        # one record of what was spent rather than two that can disagree.
+        self.budget = budget if budget is not None else BudgetGuard()
+
         # --- metrics ---------------------------------------------------------
         self.structured_calls = 0          # structured() entered
         self.first_attempt_validations = 0  # ...of which validated on reply #1
         self.reprompts = 0                 # repair rounds we had to run
-        self.usage = TokenUsage()          # everything this client has spent
 
     def _make_client(self) -> Any:
         # Imported here so that merely importing this module costs nothing, and
@@ -173,6 +178,11 @@ class BedrockLLM:
         import boto3
 
         return boto3.client("bedrock-runtime", region_name=self.region)
+
+    @property
+    def usage(self) -> TokenUsage:
+        """Everything this client has spent. Kept by the budget guard."""
+        return self.budget.usage
 
     @property
     def first_attempt_rate(self) -> float:
@@ -183,7 +193,19 @@ class BedrockLLM:
 
     # --- the single network call ------------------------------------------
     def _converse(self, *, system: str, user: str, max_tokens: int) -> LLMResponse:
-        """One `converse` round trip, retried on throttling with exponential backoff."""
+        """One `converse` round trip, retried on throttling with exponential backoff.
+
+        The budget is checked HERE, before the request leaves, and against a
+        worst-case estimate of this call. Checking after the reply comes back
+        would mean the call that broke the cap had already been billed.
+        """
+        estimated = estimate_call_usd(
+            self.model_id, system=system, user=user, max_tokens=max_tokens
+        )
+        # Session first: it guards the money the whole team shares.
+        session_guard().check(estimated)
+        self.budget.check(estimated)
+
         for attempt in range(self.max_throttle_tries):
             try:
                 raw = self._client.converse(
@@ -204,7 +226,9 @@ class BedrockLLM:
                 stop_reason=raw.get("stopReason", "end_turn"),
                 usage=_usage_of(raw, self.model_id),
             )
-            self.usage = self.usage.merge(response.usage)
+            # What it ACTUALLY cost, which is what the next check reads.
+            self.budget.add(response.usage)
+            session_guard().add(response.usage)
             return response
 
         raise AssertionError("unreachable: the loop returns or raises")  # pragma: no cover

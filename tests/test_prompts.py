@@ -111,17 +111,32 @@ def test_no_prompt_restates_the_json_contract(node):
 # --- intake ----------------------------------------------------------------
 
 
-def test_intake_forbids_inventing_and_routes_the_gap_to_missing():
+def test_intake_forbids_inventing():
     text = prompt("intake")
     assert "expected_behaviour null" in text
-    assert '"expected_behaviour" goes in missing' in text
     assert "never the obvious intermediate step" in text
-    assert "fabricated" in text
+    assert "fabrications" in text
+
+
+def test_intake_keeps_missing_for_things_that_actually_block():
+    """`missing` is a routing decision, not a completeness report.
+
+    graph.build.route_after_intake sends the run to clarify -- and clarify ENDS
+    the run -- if `missing` has a single entry. The first recording (task C4)
+    caught the model listing "environment" and a field it had just filled, so
+    the flagship demo case never reached the localiser. The prompt has to say
+    what the field is FOR.
+    """
+    text = prompt("intake")
+    assert "names of fields in THIS schema and nothing else" in text
+    assert "STOPS the run" in text
+    assert "could not begin without it" in text
+    assert "A field you filled is never missing" in text
 
 
 def test_intake_example_shows_the_steps_it_refuses_to_invent():
     text = prompt("intake")
-    assert 'NOT ["entered password", "clicked submit"]' in text
+    assert 'NOT ["entered password","clicked submit"]' in text
 
 
 # --- clarify ---------------------------------------------------------------

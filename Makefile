@@ -41,7 +41,7 @@ demo:                     ## Full run on a seeded bug, replayed, zero cost
 		--report "$$($(PY) scripts/demo_report.py)"
 
 record:                   ## Re-record cassettes against real Bedrock (COSTS MONEY)
-	REPRO_RECORD=1 LLM_PROVIDER=bedrock $(PY) -m repro.cli run --repo fixtures/demo_repos/shopcart
+	REPRO_RECORD=1 LLM_PROVIDER=bedrock $(PY) scripts/record_cassettes.py
 
 eval:
 	LLM_PROVIDER=fake $(PY) eval/run_eval.py --dataset eval/dataset.yaml
