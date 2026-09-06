@@ -1,5 +1,5 @@
 {
-  "_comment": "Mock run for the UI to build against: a realistic shopcart double-charge, including a FIRST REPRO ATTEMPT THAT FAILS and a second that succeeds. That retry is the moment the product looks agentic, so the UI must handle it. 'after_s' is the delay before each event, in seconds, scaled by repro.api.main.TIME_SCALE. Generated through the contracts in contracts.py.",
+  "_comment": "Mock run for the UI to build against: the golden dataset's shopcart free-postage case, including a FIRST REPRO ATTEMPT THAT FAILS (it tested shipping_cost() in isolation and went green) and a second that succeeds by asserting on total(). That retry is the moment the product looks agentic, so the UI must keep both attempts on screen. 'after_s' is the delay before each event in seconds, scaled by repro.api.main.TIME_SCALE. Generated through the contracts in contracts.py.",
   "events": [
     {
       "after_s": 0.0,
@@ -18,12 +18,24 @@
     {
       "after_s": 2.0,
       "type": "node_finished",
-      "label": "Report understood: checkout charged twice",
+      "label": "Report understood: charged postage over $50",
       "payload": {
         "node": "intake",
-        "confidence": 0.82,
-        "observed_behaviour": "The customer's card was charged twice for a single checkout.",
-        "missing": []
+        "facts": {
+          "observed_behaviour": "The order was charged postage even though the basket was over $50.",
+          "expected_behaviour": "Baskets over $50 should have no postage charge.",
+          "steps": [
+            "Put more than $50 of items in the basket",
+            "Went to the checkout",
+            "Saw postage added to the total anyway"
+          ],
+          "entrypoint_hint": "checkout",
+          "environment": null,
+          "missing": [
+            "environment"
+          ],
+          "confidence": 0.78
+        }
       }
     },
     {
@@ -35,80 +47,101 @@
       }
     },
     {
-      "after_s": 1.6,
+      "after_s": 1.4,
       "type": "hypothesis",
-      "label": "shopcart/checkout.py::submit",
+      "label": "shopcart/pricing.py::total",
       "payload": {
-        "file_path": "shopcart/checkout.py",
-        "symbol": "submit",
-        "rationale": "The reporter pressed Pay twice after the page hung. submit() calls the gateway without recording that a charge was already made.",
-        "confidence": 0.74
+        "file_path": "shopcart/pricing.py",
+        "symbol": "total",
+        "rationale": "total() is what the checkout charges. It adds a flat postage line after the free-postage branch has already run.",
+        "confidence": 0.79
       }
     },
     {
-      "after_s": 0.6,
+      "after_s": 0.5,
       "type": "hypothesis",
-      "label": "shopcart/gateway.py::charge",
+      "label": "shopcart/pricing.py::shipping_cost",
       "payload": {
-        "file_path": "shopcart/gateway.py",
-        "symbol": "charge",
-        "rationale": "charge() has no idempotency key, so two calls for one order are two charges. Secondary to the caller that makes both calls.",
-        "confidence": 0.41
+        "file_path": "shopcart/pricing.py",
+        "symbol": "shipping_cost",
+        "rationale": "Owns the $50 threshold the client quoted. Reached from 'free postage over $50' through the shipping/postage synonym.",
+        "confidence": 0.58
       }
     },
     {
-      "after_s": 0.8,
+      "after_s": 0.4,
+      "type": "hypothesis",
+      "label": "shopcart/cart.py::subtotal",
+      "payload": {
+        "file_path": "shopcart/cart.py",
+        "symbol": "subtotal",
+        "rationale": "Decides the number the threshold is compared against. Only wrong if the basket total itself is wrong, which the client did not say.",
+        "confidence": 0.31
+      }
+    },
+    {
+      "after_s": 0.7,
       "type": "node_finished",
-      "label": "2 candidates found",
+      "label": "3 candidates ranked",
       "payload": {
         "node": "localise",
-        "candidates": 2
+        "candidates": 3
       }
     },
     {
       "after_s": 0.2,
       "type": "node_started",
-      "label": "Writing a failing test (attempt 1 of 3)",
+      "label": "Writing a failing test",
       "payload": {
         "node": "repro",
-        "attempt_no": 1
+        "attempt_no": 1,
+        "of": 3
       }
     },
     {
       "after_s": 8.0,
       "type": "repro_attempt",
-      "label": "Attempt 1: the test passed, so nothing was reproduced",
+      "label": "Attempt 1 went green - nothing reproduced",
       "payload": {
         "attempt_no": 1,
         "reproduced": false,
-        "test_path": "tests/test_repro_double_charge.py",
+        "test_path": "tests/test_repro_free_postage.py",
+        "test_source": "from shopcart.pricing import shipping_cost\n\n\ndef test_no_postage_over_the_threshold():\n    # The basket the client described: comfortably over $50.\n    assert shipping_cost(subtotal=62.50) == 0.00\n",
+        "exit_code": 0,
         "passed": 1,
         "failed": 0,
         "errors": 0,
-        "reasoning": "The test ran and PASSED, so it did not reproduce anything. It submitted a single confirmed order, which was never the reported situation: the reporter pressed Pay a second time after the page hung. The next attempt must model the unconfirmed retry."
+        "duration_s": 1.22,
+        "stdout_tail": "tests/test_repro_free_postage.py .                            [100%]\n\n1 passed in 0.31s\n",
+        "reasoning": "The test ran and PASSED, so it reproduced nothing. shipping_cost() is correct on its own: it returns 0.00 for a $62.50 basket. The client was charged anyway, so the fault is in whatever adds postage to the total, not in the function that decides whether postage is free. Next attempt must assert on total(), which is the number the customer actually pays."
       }
     },
     {
       "after_s": 0.3,
       "type": "node_started",
-      "label": "Revising the hypothesis (attempt 2 of 3)",
+      "label": "Revising: assert on total(), not the helper",
       "payload": {
         "node": "repro",
-        "attempt_no": 2
+        "attempt_no": 2,
+        "of": 3
       }
     },
     {
       "after_s": 8.0,
       "type": "repro_attempt",
-      "label": "Attempt 2: reproduced - two charges of 42.00",
+      "label": "Attempt 2 went red - reproduced",
       "payload": {
         "attempt_no": 2,
         "reproduced": true,
-        "test_path": "tests/test_repro_double_charge.py",
+        "test_path": "tests/test_repro_free_postage.py",
+        "test_source": "from shopcart.cart import Basket\nfrom shopcart.pricing import total\n\n\ndef test_basket_over_the_threshold_is_not_charged_postage():\n    # What the client actually paid, not what one helper returns.\n    basket = Basket(items=[('jacket', 49.00), ('socks', 13.50)])\n    assert total(basket) == 62.50\n",
+        "exit_code": 1,
         "passed": 0,
         "failed": 1,
         "errors": 0,
-        "reasoning": "The test ran and failed on the assertion, and the failure is the client's complaint in code: two charges of 42.00 for one order."
+        "duration_s": 1.29,
+        "stdout_tail": "tests/test_repro_free_postage.py F                            [100%]\n\n=================================== FAILURES ===================================\n________________ test_basket_over_the_threshold_is_not_charged_postage _________\nE       assert 67.49 == 62.5\nE        +  where 67.49 = total(Basket(items=[('jacket', 49.0), ('socks', 13.5)]))\n\n1 failed in 0.34s\n",
+        "reasoning": "The test ran and failed on the assertion, and the failure is the client's complaint in numbers: a $62.50 basket billed at $67.49, which is exactly $4.99 of postage that should have been free."
       }
     },
     {
@@ -117,22 +150,27 @@
       "label": "Proposing a patch",
       "payload": {
         "node": "fix",
-        "attempt_no": 1
+        "attempt_no": 1,
+        "of": 3
       }
     },
     {
       "after_s": 9.0,
       "type": "fix_attempt",
-      "label": "Patch accepted: repro test green, suite green",
+      "label": "Patch verified twice",
       "payload": {
         "attempt_no": 1,
         "accepted": true,
         "files_touched": [
-          "shopcart/checkout.py"
+          "shopcart/pricing.py"
         ],
+        "unified_diff": "--- a/shopcart/pricing.py\n+++ b/shopcart/pricing.py\n@@ -22,12 +22,11 @@ def shipping_cost(subtotal):\n     return 0.00 if subtotal >= FREE_SHIPPING_THRESHOLD else FLAT_POSTAGE\n \n \n def total(basket):\n     items = subtotal(basket)\n-    postage = shipping_cost(items)\n-\n-    # Every order pays postage.\n-    return round(items + FLAT_POSTAGE, 2)\n+    # Charge the postage we just worked out, which is 0.00 once the\n+    # basket clears FREE_SHIPPING_THRESHOLD.\n+    return round(items + shipping_cost(items), 2)\n",
+        "rationale": "total() called shipping_cost() and then ignored it, adding FLAT_POSTAGE to every order. Using the value it already computed makes the free postage the threshold promises actually reach the customer.",
         "target_test_green": true,
+        "target_test_passed": 1,
         "suite_green": true,
-        "suite_passed": 47
+        "suite_passed": 47,
+        "reasoning": "The repro test went red to green and all 47 pre-existing tests stayed green."
       }
     },
     {
@@ -157,95 +195,108 @@
       "label": "Reproduced and fixed",
       "payload": {
         "verdict": "reproduced_and_fixed",
-        "usd": 0.0339,
-        "calls": 7
+        "usd": 0.0359,
+        "calls": 7,
+        "wall_clock_s": 33.2,
+        "handover": {
+          "dev_summary": "## Free postage over $50 was never applied\n\n**Root cause.** `shopcart/pricing.py::total` calls `shipping_cost()` and then discards the result, adding `FLAT_POSTAGE` to every order. The threshold logic was correct all along; nothing downstream used it.\n\n**Reproduction.** `tests/test_repro_free_postage.py` asserts on `total()` rather than on the helper. It fails on `main` with `assert 67.49 == 62.5` and passes with this patch.\n\n**Verification.** Repro test red to green; the 47 pre-existing tests stayed green, including `tests/test_pricing.py`.\n\n**Note on the first attempt.** Attempt 1 asserted `shipping_cost(62.50) == 0` and passed, which is why it was rejected: the helper was never the bug. Changing `>` to `>=` here would also pass a test and fix nothing.\n",
+          "client_reply": "Thank you for reporting this, and sorry you were charged for postage you should not have paid.\n\nYou were right: your basket was over $50, so postage should have been free. We were able to see the problem ourselves. Our checkout worked out that your postage should be free, and then added the standard $4.99 anyway. That is our mistake, and it would have affected every order over $50, not just yours.\n\nA fix is written and with a developer for review. Once it is released, orders over $50 will have no postage added. Someone from support will be in touch about refunding the $4.99 you were charged."
+        }
       }
     }
   ],
   "record": {
     "facts": {
-      "observed_behaviour": "The customer's card was charged twice for a single checkout.",
-      "expected_behaviour": "One checkout should produce exactly one charge.",
+      "observed_behaviour": "The order was charged postage even though the basket was over $50.",
+      "expected_behaviour": "Baskets over $50 should have no postage charge.",
       "steps": [
-        "Added a jacket to the basket",
-        "Pressed Pay on the checkout page",
-        "The page hung, so pressed Pay again"
+        "Put more than $50 of items in the basket",
+        "Went to the checkout",
+        "Saw postage added to the total anyway"
       ],
       "entrypoint_hint": "checkout",
-      "environment": "Safari on iPhone",
-      "missing": [],
-      "confidence": 0.82
+      "environment": null,
+      "missing": [
+        "environment"
+      ],
+      "confidence": 0.78
     },
     "questions": [],
     "hypotheses": [
       {
-        "file_path": "shopcart/checkout.py",
-        "symbol": "submit",
-        "rationale": "The reporter pressed Pay twice after the page hung. submit() calls the gateway without recording that a charge was already made.",
-        "confidence": 0.74
+        "file_path": "shopcart/pricing.py",
+        "symbol": "total",
+        "rationale": "total() is what the checkout charges. It adds a flat postage line after the free-postage branch has already run.",
+        "confidence": 0.79
       },
       {
-        "file_path": "shopcart/gateway.py",
-        "symbol": "charge",
-        "rationale": "charge() has no idempotency key, so two calls for one order are two charges. Secondary to the caller that makes both calls.",
-        "confidence": 0.41
+        "file_path": "shopcart/pricing.py",
+        "symbol": "shipping_cost",
+        "rationale": "Owns the $50 threshold the client quoted. Reached from 'free postage over $50' through the shipping/postage synonym.",
+        "confidence": 0.58
+      },
+      {
+        "file_path": "shopcart/cart.py",
+        "symbol": "subtotal",
+        "rationale": "Decides the number the threshold is compared against. Only wrong if the basket total itself is wrong, which the client did not say.",
+        "confidence": 0.31
       }
     ],
     "repro_attempts": [
       {
         "attempt_no": 1,
         "test": {
-          "path": "tests/test_repro_double_charge.py",
-          "source": "from shopcart.checkout import submit\nfrom shopcart.gateway import FakeGateway\n\n\ndef test_order_is_charged_once():\n    gateway = FakeGateway()\n    submit(order=make_order(total=42.00), gateway=gateway)\n    assert gateway.charges == [42.00]\n"
+          "path": "tests/test_repro_free_postage.py",
+          "source": "from shopcart.pricing import shipping_cost\n\n\ndef test_no_postage_over_the_threshold():\n    # The basket the client described: comfortably over $50.\n    assert shipping_cost(subtotal=62.50) == 0.00\n"
         },
         "result": {
           "exit_code": 0,
-          "stdout_tail": "tests/test_repro_double_charge.py .                    [100%]\n\n1 passed in 0.42s\n",
+          "stdout_tail": "tests/test_repro_free_postage.py .                            [100%]\n\n1 passed in 0.31s\n",
           "stderr_tail": "",
-          "duration_s": 1.31,
+          "duration_s": 1.22,
           "timed_out": false,
           "passed": 1,
           "failed": 0,
           "errors": 0
         },
         "reproduced": false,
-        "reasoning": "The test ran and PASSED, so it did not reproduce anything. It submitted a single confirmed order, which was never the reported situation: the reporter pressed Pay a second time after the page hung. The next attempt must model the unconfirmed retry."
+        "reasoning": "The test ran and PASSED, so it reproduced nothing. shipping_cost() is correct on its own: it returns 0.00 for a $62.50 basket. The client was charged anyway, so the fault is in whatever adds postage to the total, not in the function that decides whether postage is free. Next attempt must assert on total(), which is the number the customer actually pays."
       },
       {
         "attempt_no": 2,
         "test": {
-          "path": "tests/test_repro_double_charge.py",
-          "source": "from shopcart.checkout import submit\nfrom shopcart.gateway import FakeGateway\nfrom shopcart.orders import make_order\n\n\ndef test_retrying_an_unconfirmed_order_charges_once():\n    gateway = FakeGateway(confirm=False)\n    order = make_order(total=42.00)\n    submit(order, gateway)\n    assert gateway.charges == [42.00], gateway.charges\n"
+          "path": "tests/test_repro_free_postage.py",
+          "source": "from shopcart.cart import Basket\nfrom shopcart.pricing import total\n\n\ndef test_basket_over_the_threshold_is_not_charged_postage():\n    # What the client actually paid, not what one helper returns.\n    basket = Basket(items=[('jacket', 49.00), ('socks', 13.50)])\n    assert total(basket) == 62.50\n"
         },
         "result": {
           "exit_code": 1,
-          "stdout_tail": "tests/test_repro_double_charge.py F                    [100%]\n\n=================================== FAILURES ===================================\n___________________ test_retrying_an_unconfirmed_order_charges_once ____________\nE       AssertionError: [42.0, 42.0]\nE       assert [42.0, 42.0] == [42.0]\n\n1 failed in 0.51s\n",
+          "stdout_tail": "tests/test_repro_free_postage.py F                            [100%]\n\n=================================== FAILURES ===================================\n________________ test_basket_over_the_threshold_is_not_charged_postage _________\nE       assert 67.49 == 62.5\nE        +  where 67.49 = total(Basket(items=[('jacket', 49.0), ('socks', 13.5)]))\n\n1 failed in 0.34s\n",
           "stderr_tail": "",
-          "duration_s": 1.44,
+          "duration_s": 1.29,
           "timed_out": false,
           "passed": 0,
           "failed": 1,
           "errors": 0
         },
         "reproduced": true,
-        "reasoning": "The test ran and failed on the assertion, and the failure is the client's complaint in code: two charges of 42.00 for one order."
+        "reasoning": "The test ran and failed on the assertion, and the failure is the client's complaint in numbers: a $62.50 basket billed at $67.49, which is exactly $4.99 of postage that should have been free."
       }
     ],
     "fix_attempts": [
       {
         "attempt_no": 1,
         "patch": {
-          "unified_diff": "--- a/shopcart/checkout.py\n+++ b/shopcart/checkout.py\n@@ -38,8 +38,12 @@ def submit(order, gateway):\n     if order.total <= 0:\n         raise ValueError('nothing to charge')\n\n-    gateway.charge(order.total)\n-    if not order.confirmed:\n-        gateway.charge(order.total)\n+    # One order, one charge: a retry returns the charge we already made\n+    # instead of making a second one.\n+    if order.charge_id is not None:\n+        return order.charge_id\n+\n+    order.charge_id = gateway.charge(order.total)\n+    return order.charge_id\n",
+          "unified_diff": "--- a/shopcart/pricing.py\n+++ b/shopcart/pricing.py\n@@ -22,12 +22,11 @@ def shipping_cost(subtotal):\n     return 0.00 if subtotal >= FREE_SHIPPING_THRESHOLD else FLAT_POSTAGE\n \n \n def total(basket):\n     items = subtotal(basket)\n-    postage = shipping_cost(items)\n-\n-    # Every order pays postage.\n-    return round(items + FLAT_POSTAGE, 2)\n+    # Charge the postage we just worked out, which is 0.00 once the\n+    # basket clears FREE_SHIPPING_THRESHOLD.\n+    return round(items + shipping_cost(items), 2)\n",
           "files_touched": [
-            "shopcart/checkout.py"
+            "shopcart/pricing.py"
           ],
-          "rationale": "submit() charged again whenever the order was not yet confirmed, so a retry billed the customer twice. Recording the charge id makes the second call return the first charge instead of creating one."
+          "rationale": "total() called shipping_cost() and then ignored it, adding FLAT_POSTAGE to every order. Using the value it already computed makes the free postage the threshold promises actually reach the customer."
         },
         "target_test": {
           "exit_code": 0,
-          "stdout_tail": "tests/test_repro_double_charge.py .                    [100%]\n\n1 passed in 0.49s\n",
+          "stdout_tail": "tests/test_repro_free_postage.py .                            [100%]\n\n1 passed in 0.29s\n",
           "stderr_tail": "",
-          "duration_s": 1.38,
+          "duration_s": 1.18,
           "timed_out": false,
           "passed": 1,
           "failed": 0,
@@ -253,28 +304,28 @@
         },
         "suite": {
           "exit_code": 0,
-          "stdout_tail": "47 passed in 6.12s\n",
+          "stdout_tail": "47 passed in 5.83s\n",
           "stderr_tail": "",
-          "duration_s": 6.94,
+          "duration_s": 6.41,
           "timed_out": false,
           "passed": 47,
           "failed": 0,
           "errors": 0
         },
         "accepted": true,
-        "reasoning": "The repro test went green and all 47 pre-existing tests stayed green."
+        "reasoning": "The repro test went red to green and all 47 pre-existing tests stayed green."
       }
     ],
     "verdict": "reproduced_and_fixed",
     "handover": {
-      "dev_summary": "## Double charge on checkout retry\n\n**Root cause.** `shopcart/checkout.py::submit` calls `gateway.charge()` and then calls it a second time when `order.confirmed` is false. A customer who presses Pay again after a hung page is billed twice.\n\n**Reproduction.** `tests/test_repro_double_charge.py` fails on `main` with `assert [42.0, 42.0] == [42.0]` and passes with this patch.\n\n**Verification.** Repro test red to green; the 47 pre-existing tests stayed green. Attempt 1 did not reproduce (it submitted a confirmed order) and was discarded.\n\n**Not done.** `gateway.charge()` still has no idempotency key. Worth a separate issue.\n",
-      "client_reply": "Thank you for the report, and sorry about the double charge.\n\nWe were able to see the problem for ourselves: when the payment page hangs and you press Pay a second time, our system was treating that as a second purchase instead of a retry of the first one. That is our bug, not anything you did.\n\nWe have a fix ready and it is with a developer for review. Once it is released, pressing Pay again after a hang will not charge you a second time. Someone from support will be in touch about refunding the extra charge."
+      "dev_summary": "## Free postage over $50 was never applied\n\n**Root cause.** `shopcart/pricing.py::total` calls `shipping_cost()` and then discards the result, adding `FLAT_POSTAGE` to every order. The threshold logic was correct all along; nothing downstream used it.\n\n**Reproduction.** `tests/test_repro_free_postage.py` asserts on `total()` rather than on the helper. It fails on `main` with `assert 67.49 == 62.5` and passes with this patch.\n\n**Verification.** Repro test red to green; the 47 pre-existing tests stayed green, including `tests/test_pricing.py`.\n\n**Note on the first attempt.** Attempt 1 asserted `shipping_cost(62.50) == 0` and passed, which is why it was rejected: the helper was never the bug. Changing `>` to `>=` here would also pass a test and fix nothing.\n",
+      "client_reply": "Thank you for reporting this, and sorry you were charged for postage you should not have paid.\n\nYou were right: your basket was over $50, so postage should have been free. We were able to see the problem ourselves. Our checkout worked out that your postage should be free, and then added the standard $4.99 anyway. That is our mistake, and it would have affected every order over $50, not just yours.\n\nA fix is written and with a developer for review. Once it is released, orders over $50 will have no postage added. Someone from support will be in touch about refunding the $4.99 you were charged."
     },
     "usage": {
-      "input_tokens": 18432,
-      "output_tokens": 3110,
+      "input_tokens": 19104,
+      "output_tokens": 3362,
       "calls": 7,
-      "usd": 0.0339
+      "usd": 0.0359
     },
     "wall_clock_s": 33.2
   }
