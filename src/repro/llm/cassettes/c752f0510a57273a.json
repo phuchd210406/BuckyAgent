@@ -1,0 +1,14 @@
+{
+  "raw_text": "```json\n{\n  \"file_path\": \"shopcart/pricing.py\",\n  \"symbol\": \"shipping_for\",\n  \"rationale\": \"The client was 'charged postage fee despite basket total exceeding $50'. The shipping_for function compares the threshold against the discounted subtotal rather than the pre-discount total, so a $55 basket with an applied discount falls below $50 and incurs the shipping charge.\",\n  \"confidence\": 0.95\n}\n```",
+  "schema": "Hypothesis",
+  "stop_reason": "end_turn",
+  "system": "Name the one place in the code that best explains what the client observed.\n\nYou get the extracted facts and snippets found by local search. Choose the snippet whose code most directly PRODUCES the observed behaviour - not the most interesting code, not the code most in need of tidying.\n\nCopy file_path exactly from the hit you chose. Never propose a fix, that is a later step. If nothing explains the report, take the closest hit and set confidence below 0.3 rather than manufacture certainty.\n\nrationale is two sentences: the first quotes the client's own words, the second names the line or condition that produces them. Example:\n\"The client was 'charged postage even though the site says free postage over $50'. shipping_for compares that threshold against the already-discounted subtotal, so a $55 basket with a promo falls under $50 and is charged.\"\n",
+  "text": "{\"file_path\":\"shopcart/pricing.py\",\"symbol\":\"shipping_for\",\"rationale\":\"The client was 'charged postage fee despite basket total exceeding $50'. The shipping_for function compares the threshold against the discounted subtotal rather than the pre-discount total, so a $55 basket with an applied discount falls below $50 and incurs the shipping charge.\",\"confidence\":0.95}",
+  "usage": {
+    "calls": 1,
+    "input_tokens": 708,
+    "output_tokens": 115,
+    "usd": 0.001283
+  },
+  "user": "{\"facts\": {\"observed_behaviour\": \"charged postage fee despite basket total exceeding $50 and site stating free postage over $50\", \"expected_behaviour\": \"no postage charge should apply\", \"steps\": [\"attempted to purchase items\", \"basket total was over $50\"], \"entrypoint_hint\": \"checkout\", \"environment\": null, \"missing\": [\"expected_behaviour\"], \"confidence\": 0.72}, \"hits\": [{\"path\": \"shopcart/pricing.py\", \"snippet\": \"def shipping_for(subtotal: float) -> float:\\n    \\\"\\\"\\\"Free shipping once the order is large enough.\\\"\\\"\\\"\\n    # DEMO BUG #1: threshold is compared against the DISCOUNTED subtotal by the\\n    # caller, but the promise on the website is about the pre-discount total.\\n    # A customer with a 55.00 basket and SAVE10 drops to 49.50 and is charged\\n    # shipping they were told was free.\\n    if subtotal > FREE_SHIPPING_THRESHOLD:\\n        return 0.0\\n    return SHIPPING_FLAT\"}]}"
+}

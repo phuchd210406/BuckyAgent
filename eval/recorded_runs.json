@@ -16,9 +16,9 @@
         "reporter_name": null,
         "run_id": "shopcart-free-shipping"
       },
-      "usd": 0.002566,
-      "verdict": "needs_clarification"
+      "usd": 0.014147,
+      "verdict": "reproduced_not_fixed"
     }
   ],
-  "total_usd": 0.002566
+  "total_usd": 0.014147
 }

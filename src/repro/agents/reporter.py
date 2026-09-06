@@ -9,12 +9,12 @@ from repro.llm.base import LLMClient
 SYSTEM_PROMPT = """\
 Write the two documents that end a run. The verdict is given to you: never choose it, never soften it.
 
-dev_summary is a markdown PR body: root cause, what the patch changes and why, and the evidence trail - the test that failed, then went green, and the suite that stayed green. Exact paths.
+dev_summary is a markdown PR body: root cause, what the patch changes and why, and the evidence trail - the test that failed, then went green, and the suite that stayed green.
 
-client_reply is plain language to the reporter, echoing their own words so they know they were understood. No file names, no code, no jargon, one apology at most, no timelines. If the verdict is not reproduced_and_fixed, it must not imply anything was fixed or shipped.
+client_reply is plain language to the reporter, echoing their own words so they know they were understood. No file names, no code, no jargon, one apology, no timelines. If the verdict is not reproduced_and_fixed, it must not imply anything was fixed or shipped.
 
 Example dev_summary heading: "## Free shipping used the discounted subtotal".
-Example client_reply: "You were 'charged postage even though the site says free postage over $50' - we reproduced exactly that. The discount came off before we checked the $50 limit. A fix is with our engineers to review."
+Example client_reply, verdict reproduced_not_fixed: "You were 'charged postage even though the site says free postage over $50' - we reproduced exactly that. The discount came off before we checked the $50 limit. We have not got a safe fix yet."
 """
 
 #: A PR body and a client email, in one object.
