@@ -109,20 +109,80 @@ Do this **once**, screen-record it while it happens, and tear it down the same
 hour. You are deploying to satisfy the technical-quality criterion and to have
 real deployment footage, not to run production.
 
-```bash
-pip install bedrock-agentcore-starter-toolkit
-cd src/repro/agentcore
+**Run every command from the repository root.** `agentcore configure` uses your
+current directory as the Docker build context — its generated Dockerfile ends
+`COPY . .` — and derives the module to run from the entrypoint path *relative to
+that directory*. Running it from `src/repro/agentcore` therefore packages two
+files, `agent.py` and `__init__.py`, and nothing else: no dependency file (the
+CLI stops and asks for one), and no `repro` package. Answering that prompt does
+not save you, because the build then succeeds and the **runtime** dies with
+`ModuleNotFoundError: No module named 'repro'` — after the ten-minute billable
+build.
 
-agentcore configure --entrypoint agent.py --region <the region check_bedrock chose>
+```bash
+pip install 'bedrock-agentcore-starter-toolkit==0.3.12'   # also pinned in requirements.txt
+cd "$(git rev-parse --show-toplevel)"      # the build context. Not src/repro/agentcore.
+
+agentcore configure \
+  --entrypoint src/repro/agentcore/agent.py \
+  --requirements-file requirements.txt \
+  --region <the region check_bedrock chose>
 #   writes .bedrock_agentcore.yaml, creates the IAM execution role, provisions S3
 
-agentcore launch
+grep -E '^CMD' Dockerfile
+#   must print: CMD ["python", "-m", "src.repro.agentcore.agent"]
+#   Anything else means the build context is wrong. Stop and re-run configure.
+```
+
+### Prove the image locally before you pay for it
+
+```bash
+agentcore launch --local --env PYTHONPATH=src --env LLM_PROVIDER=stub
+
+curl -s localhost:8080/ping
+curl -s -X POST localhost:8080/invocations -H 'Content-Type: application/json' \
+  -d '{"report":{"run_id":"local","raw_text":"charged postage","repo_path":"fixtures/demo_repos/shopcart"}}'
+```
+
+`LLM_PROVIDER=stub` needs no AWS and no cassettes (see `agent.py`), so this is
+free and offline. It is where a broken `PYTHONPATH` costs you two minutes
+instead of a billable build. While the container is up, confirm the demo repo
+actually shipped — the toolkit auto-generates a `.dockerignore` that excludes
+`tests/`, and the agent needs shopcart's suite to verify a patch:
+
+```bash
+docker run --rm --entrypoint ls <image> fixtures/demo_repos/shopcart/tests
+```
+
+### Then the billable launch
+
+`launch` was renamed `deploy` in starter-toolkit 0.3.x (`agentcore deploy`,
+`agentcore deploy --local`). Both names work today; the toolkit prints a
+deprecation notice for the old one, alongside a louder notice that the starter
+toolkit itself is superseded by the `@aws/agentcore` npm CLI. Do not switch CLIs
+at hour 26 — set `AGENTCORE_SUPPRESS_RECOMMENDATION=1` and keep moving.
+
+```bash
+agentcore launch --env PYTHONPATH=src --env LLM_PROVIDER=bedrock
 #   uploads source, builds the image, pushes to ECR, waits for READY
 #   ~10 minutes. Billing starts here. Record your screen for this.
 
 agentcore status
-agentcore invoke '{"report": {"run_id":"live","raw_text":"...","repo_path":"..."}}'
+agentcore invoke '{"report": {"run_id":"live","raw_text":"...","repo_path":"fixtures/demo_repos/shopcart"}}'
 ```
+
+Both `--env` flags are load-bearing, and neither can be dropped:
+
+* `PYTHONPATH=src` — `repro` is not pip-installed (deliberately: see the Makefile
+  header), so without it the container cannot import its own package. It cannot
+  be fixed through the requirements file either. The generated Dockerfile copies
+  *only* the dependency file and installs it **before** `COPY . .`, so a `.`
+  entry in `requirements.txt` fails with no `pyproject.toml` in the image yet;
+  and pointing `--requirements-file` at `pyproject.toml` installs `repro` but
+  none of the runtime dependencies, because that file has no
+  `[project.dependencies]`.
+* `LLM_PROVIDER=bedrock` — `agent.py` defaults to `fake`, which replays
+  cassettes. Deployed without this you get "No cassette", not a real run.
 
 Then, **the same hour, without fail:**
 
