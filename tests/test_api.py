@@ -7,12 +7,22 @@ that ends, and a record that only exists once the run is terminal.
 from __future__ import annotations
 
 import json
+import pathlib
 
 import pytest
 from fastapi.testclient import TestClient
 
 from repro.api import main
-from repro.contracts import RunRecord, StreamEvent, Verdict
+from repro.contracts import (
+    ClientReport,
+    ExecutionResult,
+    FixAttempt,
+    Handover,
+    Patch,
+    RunRecord,
+    StreamEvent,
+    Verdict,
+)
 
 NEW_RUN = {
     "raw_text": "I was charged twice for one order.",
@@ -23,7 +33,8 @@ NEW_RUN = {
 
 @pytest.fixture(autouse=True)
 def _instant(monkeypatch):
-    """Real pacing is 33 seconds. Tests assert the ordering, not the waiting."""
+    """Mock path, no waiting. Real pacing is 33s; tests assert order, not time."""
+    monkeypatch.setenv("MOCK", "1")
     monkeypatch.setattr(main, "TIME_SCALE", 0.0)
     main.RUNS.clear()
 
@@ -49,8 +60,9 @@ def read_events(client, run_id: str) -> list[StreamEvent]:
 # --- the three routes ---------------------------------------------------------
 
 
-def test_healthz(client):
-    assert client.get("/healthz").json() == {"ok": True}
+def test_healthz_says_which_mode_it_is_in(client):
+    # Which mode matters during a demo: "why is it instant?" has one answer.
+    assert client.get("/healthz").json() == {"ok": True, "mode": "mock"}
 
 
 def test_post_runs_returns_a_run_id(client):
@@ -95,6 +107,27 @@ def test_the_stream_shows_a_failed_first_repro_then_a_successful_retry(client):
     assert [a.payload["attempt_no"] for a in attempts] == [1, 2]
     assert [a.payload["reproduced"] for a in attempts] == [False, True]
     assert attempts[0].payload["reasoning"]  # the UI shows WHY attempt 1 did not count
+
+
+def test_the_verdict_event_says_who_the_reply_is_addressed_to(client):
+    # The reply is a letter to a person; the fixture cannot know their name, so
+    # it comes off the report the run was started from.
+    run_id = client.post("/runs", json={**NEW_RUN, "reporter_name": "Sarah Whitfield"}).json()[
+        "run_id"
+    ]
+
+    verdict = read_events(client, run_id)[-1]
+
+    assert verdict.type == "verdict"
+    assert verdict.payload["reporter_name"] == "Sarah Whitfield"
+    assert verdict.payload["handover"]["client_reply"]
+
+
+def test_the_verdict_event_carries_no_name_when_none_was_given(client):
+    anonymous = {key: value for key, value in NEW_RUN.items() if key != "reporter_name"}
+    run_id = client.post("/runs", json=anonymous).json()["run_id"]
+
+    assert read_events(client, run_id)[-1].payload["reporter_name"] is None
 
 
 def test_a_late_subscriber_still_gets_the_whole_story(client):
@@ -201,3 +234,266 @@ def test_every_fixture_event_is_a_valid_stream_event():
         )
     # And the payloads are JSON, because that is what goes down the wire.
     json.dumps(main.load_fixture())
+
+
+# --- the invariant gate --------------------------------------------------------
+
+
+def _unsound_record(run_id: str) -> RunRecord:
+    """A patch accepted on a run that never reproduced anything. Forbidden."""
+    green = ExecutionResult(exit_code=0, stdout_tail="", stderr_tail="", duration_s=0.1)
+    return RunRecord(
+        run_id=run_id,
+        report=ClientReport(run_id=run_id, raw_text="x", repo_path="/tmp/x"),
+        repro_attempts=[],
+        fix_attempts=[
+            FixAttempt(
+                attempt_no=1,
+                patch=Patch(
+                    unified_diff="--- a/shopcart/pricing.py\n+++ b/shopcart/pricing.py\n+DANGER\n",
+                    files_touched=["shopcart/pricing.py"],
+                    rationale="Fabricated. Never verified.",
+                ),
+                target_test=green,
+                suite=green,
+                accepted=True,
+                reasoning="fabricated",
+            )
+        ],
+        verdict=Verdict.REPRODUCED_AND_FIXED,
+        handover=Handover(dev_summary="apply this patch", client_reply="we fixed it"),
+    )
+
+
+def test_a_record_with_violated_invariants_is_served_without_a_patch(client, monkeypatch):
+    """The API is the last gate, and it does not trust the graph to have held.
+
+    A patch that failed its own verification must never reach a human who
+    trusts this endpoint -- so the check is repeated here even though run()
+    already did it.
+    """
+    monkeypatch.delenv("MOCK", raising=False)
+    monkeypatch.setattr(main, "llm_for", lambda *a, **k: None)
+    monkeypatch.setattr(main, "check_repo_path", lambda path: None)
+
+    def graph_that_lies(report, llm, *, on_event=None, **kwargs):
+        return _unsound_record(report.run_id)
+
+    monkeypatch.setattr(main, "run_graph", graph_that_lies)
+
+    run_id = client.post("/runs", json=NEW_RUN).json()["run_id"]
+    stream_events = read_events(client, run_id)
+    response = client.get(f"/runs/{run_id}")
+
+    assert response.status_code == 200
+    served = response.json()
+    # Not one byte of the patch survives.
+    assert "DANGER" not in json.dumps(served)
+    for attempt in served["fix_attempts"]:
+        assert attempt["patch"]["unified_diff"] == ""
+        assert attempt["patch"]["files_touched"] == []
+        assert attempt["accepted"] is False
+    assert served["verdict"] == Verdict.ABORTED_BUDGET.value
+    assert served["handover"] is None
+    # And the record that IS served is sound.
+    assert RunRecord.model_validate(served).check_invariants() == []
+
+    # The stream says so out loud, rather than quietly serving less.
+    failures = [event for event in stream_events if event.type == "error"]
+    assert failures, "the UI must be told the verification failed"
+    assert failures[0].payload["error"] == "verification failed"
+    assert any(
+        "accepted without a reproduction" in violation
+        for violation in failures[0].payload["violations"]
+    )
+
+
+def test_a_sound_record_passes_the_gate_untouched(client, monkeypatch):
+    monkeypatch.delenv("MOCK", raising=False)
+    monkeypatch.setattr(main, "llm_for", lambda *a, **k: None)
+    monkeypatch.setattr(main, "check_repo_path", lambda path: None)
+    sound = _unsound_record("placeholder").model_copy(
+        update={"verdict": Verdict.NOT_REPRODUCED, "fix_attempts": []}
+    )
+    monkeypatch.setattr(main, "run_graph", lambda report, llm, **kw: sound)
+
+    run_id = client.post("/runs", json=NEW_RUN).json()["run_id"]
+    read_events(client, run_id)
+
+    assert client.get(f"/runs/{run_id}").json()["verdict"] == Verdict.NOT_REPRODUCED.value
+
+
+# --- mock vs live ---------------------------------------------------------------
+
+
+def test_mock_is_off_by_default_and_on_with_the_env_var(monkeypatch):
+    monkeypatch.delenv("MOCK", raising=False)
+    assert main.mock_enabled() is False
+    monkeypatch.setenv("MOCK", "1")
+    assert main.mock_enabled() is True
+    assert client_mode() == "mock"
+
+
+def client_mode() -> str:
+    with TestClient(main.app) as probe:
+        return probe.get("/healthz").json()["mode"]
+
+
+def test_a_real_run_will_not_copy_an_arbitrary_directory(client, monkeypatch, tmp_path):
+    # The endpoint has no auth. Without this, `repo_path` is a read of any
+    # directory on the machine, and the model sees whatever is in it.
+    monkeypatch.delenv("MOCK", raising=False)
+    monkeypatch.setattr(main, "ALLOWED_REPO_ROOT", str(tmp_path / "demo_repos"))
+
+    response = client.post("/runs", json={**NEW_RUN, "repo_path": "/etc"})
+
+    assert response.status_code == 400
+    assert "no auth" in response.json()["detail"]
+
+
+def test_a_repo_that_does_not_exist_is_rejected_at_post_time(client, monkeypatch, tmp_path):
+    monkeypatch.delenv("MOCK", raising=False)
+    (tmp_path / "demo_repos").mkdir()
+    monkeypatch.setattr(main, "ALLOWED_REPO_ROOT", str(tmp_path / "demo_repos"))
+
+    response = client.post(
+        "/runs", json={**NEW_RUN, "repo_path": str(tmp_path / "demo_repos" / "nope")}
+    )
+
+    assert response.status_code == 400
+    assert "no such repository" in response.json()["detail"]
+
+
+# --- the real graph, end to end -------------------------------------------------
+
+
+def _demo_repo(tmp_path) -> pathlib.Path:
+    """A tiny but real Python project, with a real bug and a real test suite."""
+    repo = tmp_path / "demo_repos" / "shopcart"
+    (repo / "shopcart").mkdir(parents=True)
+    (repo / "tests").mkdir()
+    (repo / "shopcart" / "__init__.py").write_text("")
+    (repo / "shopcart" / "pricing.py").write_text(
+        "FREE_SHIPPING_THRESHOLD = 50.0\nFLAT_POSTAGE = 4.99\n\n\n"
+        "def shipping_cost(subtotal):\n"
+        "    return 0.0 if subtotal >= FREE_SHIPPING_THRESHOLD else FLAT_POSTAGE\n\n\n"
+        "def total(subtotal):\n"
+        "    return round(subtotal + FLAT_POSTAGE, 2)  # the bug\n"
+    )
+    (repo / "tests" / "test_pricing.py").write_text(
+        "from shopcart.pricing import shipping_cost\n\n\n"
+        "def test_threshold():\n    assert shipping_cost(60) == 0.0\n"
+    )
+    return repo
+
+
+def test_a_real_run_streams_real_events_and_serves_a_real_record(
+    client, monkeypatch, tmp_path
+):
+    """No mock: the real graph, a real workspace copy, real pytest subprocesses.
+
+    The scripted model keeps writing a test that passes, so nothing reproduces
+    and the run ends at the cap -- which is the one full path available before
+    Engineer B's patcher lands, and it exercises everything else.
+    """
+    from repro.contracts import Handover, Hypothesis, ReportFacts, TestArtifact
+    from repro.llm.fake import ScriptedLLM
+
+    repo = _demo_repo(tmp_path)
+    monkeypatch.delenv("MOCK", raising=False)
+    monkeypatch.setattr(main, "ALLOWED_REPO_ROOT", str(tmp_path / "demo_repos"))
+
+    def passing_test(n):
+        return TestArtifact(
+            path=f"tests/test_repro_{n}.py",
+            source="from shopcart.pricing import shipping_cost\n\n\n"
+            f"def test_attempt_{n}():\n    assert shipping_cost(62.5) == 0.0\n",
+        )
+
+    script = [
+        ReportFacts(observed_behaviour="charged postage over $50", confidence=0.8),
+        Hypothesis(file_path="shopcart/pricing.py", symbol="total",
+                   rationale="Adds postage. Always.", confidence=0.7),
+        passing_test(1), passing_test(2), passing_test(3),
+        Handover(dev_summary="Could not reproduce.", client_reply="We could not reproduce it."),
+    ]
+    monkeypatch.setattr(main, "llm_for", lambda *a, **k: ScriptedLLM(script))
+
+    run_id = client.post(
+        "/runs",
+        json={"raw_text": "charged postage over $50", "repo_path": str(repo),
+              "reporter_name": "Sarah Whitfield"},
+    ).json()["run_id"]
+    stream_events = read_events(client, run_id)
+
+    kinds = [event.type for event in stream_events]
+    assert kinds[0] == "run_started"
+    assert kinds[-1] == "verdict"
+    # Three real pytest runs, each one green, so none of them reproduced.
+    attempts = [e for e in stream_events if e.type == "repro_attempt"]
+    assert [a.payload["reproduced"] for a in attempts] == [False, False, False]
+    assert all(a.payload["passed"] == 1 for a in attempts)
+    assert all(a.payload["test_source"] for a in attempts)
+    # Retrieval really ran: it ranked candidates out of the copied workspace.
+    assert [e for e in stream_events if e.type == "hypothesis"]
+    # The reply card needs to know who to address.
+    assert stream_events[-1].payload["reporter_name"] == "Sarah Whitfield"
+
+    served = client.get(f"/runs/{run_id}").json()
+    record = RunRecord.model_validate(served)
+    assert record.verdict == Verdict.NOT_REPRODUCED
+    assert len(record.repro_attempts) == 3
+    assert record.check_invariants() == []
+    assert record.usage.calls == 6
+
+    # The sandbox is a copy: the project on disk is exactly as it was.
+    assert "the bug" in (repo / "shopcart" / "pricing.py").read_text()
+    assert not (repo / "tests" / "test_repro_1.py").exists()
+
+
+def test_a_run_that_dies_says_so_terminally_rather_than_just_going_quiet(
+    client, monkeypatch
+):
+    """A dead run must announce itself.
+
+    Without a terminal marker the stream simply ends with no verdict, the
+    browser's EventSource calls that a dropped connection, and the UI blames
+    the network for something the run already explained.
+    """
+    monkeypatch.delenv("MOCK", raising=False)
+    monkeypatch.setattr(main, "llm_for", lambda *a, **k: None)
+    monkeypatch.setattr(main, "check_repo_path", lambda path: None)
+
+    def graph_that_dies(report, llm, **kwargs):
+        raise RuntimeError("the sandbox caught fire")
+
+    monkeypatch.setattr(main, "run_graph", graph_that_dies)
+
+    run_id = client.post("/runs", json=NEW_RUN).json()["run_id"]
+    stream_events = read_events(client, run_id)
+
+    last = stream_events[-1]
+    assert last.type == "error"
+    assert last.payload["terminal"] is True
+    assert "the sandbox caught fire" in last.payload["error"]
+
+    failed = client.get(f"/runs/{run_id}")
+    assert failed.status_code == 500
+    assert "the sandbox caught fire" in failed.json()["error"]
+
+
+def test_verification_failure_is_not_terminal_because_a_verdict_still_follows(
+    client, monkeypatch
+):
+    monkeypatch.delenv("MOCK", raising=False)
+    monkeypatch.setattr(main, "llm_for", lambda *a, **k: None)
+    monkeypatch.setattr(main, "check_repo_path", lambda path: None)
+    monkeypatch.setattr(
+        main, "run_graph", lambda report, llm, **kw: _unsound_record(report.run_id)
+    )
+
+    run_id = client.post("/runs", json=NEW_RUN).json()["run_id"]
+    stream_events = read_events(client, run_id)
+
+    failure = next(event for event in stream_events if event.type == "error")
+    assert failure.payload["terminal"] is False

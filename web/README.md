@@ -8,14 +8,25 @@ plus a reducer that turns the SSE event log into an ordered list of cards.
 Two terminals, from the repo root:
 
 ```sh
-make api          # FastAPI on :8000 — mock runs, no AWS, no cost
+make api                               # FastAPI on :8000 — REAL runs
 cd web && npm install && npm run dev   # Vite on :5173
 ```
 
+`make api` invokes the real graph. For UI work, and for rehearsal when
+something upstream is broken, replay the fixture instead:
+
+```sh
+MOCK=1 make api                        # no AWS, no repo, no cost
+MOCK=1 REPRO_MOCK_SPEED=0.1 make api   # ...and ten times faster
+```
+
+Both paths emit through `repro.graph.events`, so the browser cannot tell them
+apart. `GET /healthz` reports which one is running.
+
 Open http://localhost:5173 and press **Run**. Vite proxies `/runs` and
 `/healthz` to :8000, so the browser stays on one origin and the API needs no
-CORS. A run takes ~33 seconds, which is deliberate: it is the pacing of a real
-run. `REPRO_MOCK_SPEED=0.1 make api` runs it ten times faster while developing.
+CORS. A mock run takes ~33 seconds, which is deliberate: it is the pacing of a real
+run.
 
 ## What the screen has to get right
 

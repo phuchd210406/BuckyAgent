@@ -74,6 +74,12 @@ export function buildCards(events) {
         const reportAt = cards.findIndex((card) => card.kind === 'report')
         if (reportAt !== -1) cards.splice(reportAt, 1)
         cards.push({ key: 'verdict', kind: 'verdict', state: 'done', data: payload })
+        // The reply to the client is its own panel, and it is deliberately the
+        // last thing on the page: it is the half of the output that no other
+        // bug-fixing agent produces.
+        if (payload.handover?.client_reply) {
+          cards.push({ key: 'client-reply', kind: 'client_reply', state: 'done', data: payload })
+        }
         break
       }
       case 'error':
@@ -101,6 +107,8 @@ const BETWEEN_STEPS = {
       ? 'Patch accepted — writing the handover'
       : 'Patch rejected — deciding whether to try again',
   report: () => 'Finishing up',
+  // A non-terminal error (verification failed) is still followed by a verdict.
+  error: () => 'Finishing up',
 }
 
 /** The one line that says what is happening right now. Never just a spinner. */

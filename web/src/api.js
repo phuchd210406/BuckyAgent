@@ -41,6 +41,14 @@ export function followRun(runId, { onEvent, onDone, onError }) {
       if (event.type === 'verdict') {
         close()
         onDone(event)
+        return
+      }
+      // A run that died emits a terminal error and no verdict. Without this the
+      // stream just ends, EventSource calls it a dropped connection, and the UI
+      // blames the network for something the run already explained.
+      if (event.type === 'error' && event.payload?.terminal) {
+        close()
+        onError(new Error(event.payload.error || 'the run stopped'))
       }
     })
   }

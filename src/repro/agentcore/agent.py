@@ -21,6 +21,7 @@ import os
 from bedrock_agentcore.runtime import BedrockAgentCoreApp  # type: ignore
 from pydantic import ValidationError
 
+from repro import clients
 from repro.contracts import (
     MAX_REPRO_ATTEMPTS,
     ClientReport,
@@ -95,23 +96,16 @@ def _bad_request(detail: list[dict]) -> dict:
 
 
 def llm_for(provider: str) -> LLMClient:
-    """LLM_PROVIDER=bedrock deployed, =fake locally on cassettes, =stub for smoke."""
-    if provider == "bedrock":
-        from repro.llm.bedrock import BedrockLLM, RecordingLLM
-        from repro.settings import settings
+    """LLM_PROVIDER=bedrock deployed, =fake locally on cassettes, =stub for smoke.
 
-        client = BedrockLLM()
-        return RecordingLLM(client) if settings().record else client
-    if provider == "fake":
-        from repro.llm.fake import FakeLLM
-        from repro.settings import settings
-
-        return FakeLLM(settings().cassette_dir)
+    Only `stub` is ours; the other two come from repro.clients so the API and
+    this entrypoint cannot drift apart on what a provider name means.
+    """
     if provider == "stub":
         from repro.llm.fake import ScriptedLLM
 
         return ScriptedLLM(_smoke_script())
-    raise ValueError(f"unknown LLM_PROVIDER {provider!r}: expected bedrock, fake or stub")
+    return clients.llm_for(provider)
 
 
 def sandbox_for(provider: str) -> Sandbox | None:

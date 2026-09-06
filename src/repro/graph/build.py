@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
+from typing import Callable
 
 from langgraph.graph import END, START, StateGraph
 
@@ -34,9 +35,14 @@ from repro.contracts import (
     LLMResponse,
     Patch,
     RunRecord,
+    StreamEvent,
     TokenUsage,
     Verdict,
 )
+from repro.contracts import (
+    MAX_FIX_ATTEMPTS as _MAX_FIX,
+)
+from repro.graph import events
 from repro.graph.sandbox_seam import Sandbox, StubSandbox, WorkspaceSandbox
 from repro.graph.state import GraphState
 from repro.llm.base import LLMClient
@@ -48,6 +54,24 @@ LOG = logging.getLogger("repro.graph")
 # Not a loop bound, so it does not live in contracts.py: this is the intake
 # quality gate from docs/ARCHITECTURE.md ("confidence < 0.6 or missing critical").
 CLARIFY_CONFIDENCE_FLOOR = 0.6
+
+#: Somewhere to send StreamEvents as they happen. Called from the graph thread.
+EventSink = Callable[[StreamEvent], None]
+
+
+def _sink(on_event: EventSink | None) -> EventSink:
+    """Never let a watcher break the thing it is watching."""
+    if on_event is None:
+        return lambda event: None
+
+    def safe(event: StreamEvent) -> None:
+        try:
+            on_event(event)
+        except Exception:  # noqa: BLE001 - a dropped event is not a failed run
+            LOG.exception("run %s: an event sink raised; the run continues", event.run_id)
+
+    return safe
+
 
 # ---------------------------------------------------------------------------
 # Budget.
@@ -197,8 +221,14 @@ NODE_COUNTERS = {"clarify": "clarify_rounds", "repro": "repro_count", "fix": "fi
 SANDBOX_NODES = frozenset({"localise", "repro", "fix"})
 
 
-def _guarded(name: str, node, llm: _MeteredLLM, sandbox: Sandbox):
-    """Wrap a node: budget check on entry, counters and usage owned by us."""
+def _guarded(name: str, node, llm: _MeteredLLM, sandbox: Sandbox, emit):
+    """Wrap a node: budget check on entry, counters and usage owned by us.
+
+    This is also where the run becomes watchable. The guard already brackets
+    every node, so it is the one place that knows a node started, what it
+    returned, and that nothing else ran in between -- which is exactly what a
+    transition is. No LangGraph streaming, no second source of truth.
+    """
     counter = NODE_COUNTERS.get(name)
 
     def run_node(state: GraphState) -> dict:
@@ -206,6 +236,10 @@ def _guarded(name: str, node, llm: _MeteredLLM, sandbox: Sandbox):
             # Do not run the body, do not call the model, do not increment.
             # The routers see the same thing and steer the run to its end.
             return {"verdict": Verdict.ABORTED_BUDGET}
+
+        run_id = state["report"].run_id
+        attempt_no = (state.get(counter, 0) + 1) if counter in ("repro_count", "fix_count") else None
+        emit(events.node_started(run_id, name, attempt_no, _CAP_FOR.get(name)))
 
         llm.take()  # drop anything stray so this node is charged for its own calls
         if name in SANDBOX_NODES:
@@ -222,13 +256,37 @@ def _guarded(name: str, node, llm: _MeteredLLM, sandbox: Sandbox):
 
         if budget_exhausted(update):
             update["verdict"] = Verdict.ABORTED_BUDGET
+        _emit_for(emit, run_id, name, update)
         return update
 
     run_node.__name__ = f"guarded_{name}"
     return run_node
 
 
-def build_graph(llm: LLMClient, sandbox: Sandbox | None = None):
+#: How many attempts each looping node is allowed, for the "(2 of 3)" in the UI.
+_CAP_FOR = {"repro": MAX_REPRO_ATTEMPTS, "fix": _MAX_FIX}
+
+
+def _emit_for(emit, run_id: str, name: str, update: dict) -> None:
+    """Turn what a node returned into events. Driven by the update, not a guess."""
+    if update.get("facts") is not None:
+        emit(events.intake_finished(run_id, update["facts"]))
+    for question in update.get("questions", []):
+        emit(events.clarify_asked(run_id, question))
+    hypotheses = update.get("hypotheses", [])
+    for hypothesis in hypotheses:
+        emit(events.hypothesis_found(run_id, hypothesis))
+    if hypotheses:
+        emit(events.localise_finished(run_id, len(hypotheses)))
+    for attempt in update.get("repro_attempts", []):
+        emit(events.repro_attempted(run_id, attempt))
+    for attempt in update.get("fix_attempts", []):
+        emit(events.fix_attempted(run_id, attempt))
+    if name == "report":
+        emit(events.report_finished(run_id))
+
+
+def build_graph(llm: LLMClient, sandbox: Sandbox | None = None, on_event: EventSink | None = None):
     """Compile and return the Repro graph.
 
     Shape (see docs/ARCHITECTURE.md):
@@ -242,6 +300,7 @@ def build_graph(llm: LLMClient, sandbox: Sandbox | None = None):
     """
     metered = _MeteredLLM(llm)
     sandbox = StubSandbox() if sandbox is None else sandbox
+    emit = _sink(on_event)
 
     graph = StateGraph(GraphState)
     for name, node in (
@@ -252,7 +311,7 @@ def build_graph(llm: LLMClient, sandbox: Sandbox | None = None):
         ("fix", fix_node),
         ("report", reporter_node),
     ):
-        graph.add_node(name, _guarded(name, node, metered, sandbox))
+        graph.add_node(name, _guarded(name, node, metered, sandbox, emit))
 
     graph.add_edge(START, "intake")
     graph.add_conditional_edges(
@@ -304,7 +363,13 @@ def open_workspace(report: ClientReport, settings: Settings | None = None) -> Wo
     return Workspace(report.repo_path, root=Path(settings.workspace_root) / report.run_id)
 
 
-def run(report: ClientReport, llm: LLMClient, *, sandbox: Sandbox | None = None) -> RunRecord:
+def run(
+    report: ClientReport,
+    llm: LLMClient,
+    *,
+    sandbox: Sandbox | None = None,
+    on_event: EventSink | None = None,
+) -> RunRecord:
     """Run one report end to end. This is the function everyone else calls.
 
         from repro.graph.build import run
@@ -315,8 +380,14 @@ def run(report: ClientReport, llm: LLMClient, *, sandbox: Sandbox | None = None)
 
     Pass `sandbox` to supply your own (tests, or a caller that owns the
     workspace already); then closing it is the caller's job.
+
+    Pass `on_event` to watch it happen: one StreamEvent per transition, emitted
+    from whatever thread is running the graph. A sink that raises is ignored --
+    a broken watcher must never take down the run it is watching.
     """
     started = time.monotonic()
+    emit = _sink(on_event)
+    emit(events.run_started(report))
     workspace: Workspace | None = None
     try:
         if sandbox is None:
@@ -325,7 +396,7 @@ def run(report: ClientReport, llm: LLMClient, *, sandbox: Sandbox | None = None)
         initial: GraphState = {"report": report}
         if workspace is not None:
             initial["workspace_path"] = str(workspace.path)
-        final_state = build_graph(llm, sandbox=sandbox).invoke(initial)
+        final_state = build_graph(llm, sandbox=sandbox, on_event=emit).invoke(initial)
     finally:
         # Even when the graph raised. A leaked workspace is a leaked copy of a
         # client's repository sitting in /tmp.
@@ -334,10 +405,12 @@ def run(report: ClientReport, llm: LLMClient, *, sandbox: Sandbox | None = None)
 
     record = assemble_run_record(final_state)
     record.wall_clock_s = round(time.monotonic() - started, 3)
-    return enforce_invariants(record)
+    record = enforce_invariants(record, emit)
+    emit(events.verdict_reached(record, report.reporter_name))
+    return record
 
 
-def enforce_invariants(record: RunRecord) -> RunRecord:
+def enforce_invariants(record: RunRecord, on_event: EventSink | None = None) -> RunRecord:
     """The last gate before anything leaves this process.
 
     A record that violates its own invariants is a record we cannot explain, so
@@ -356,6 +429,7 @@ def enforce_invariants(record: RunRecord) -> RunRecord:
     )
     for violation in violations:
         LOG.error("run %s invariant violated: %s", record.run_id, violation)
+    _sink(on_event)(events.verification_failed(record.run_id, violations))
 
     return record.model_copy(
         update={

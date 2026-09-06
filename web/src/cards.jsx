@@ -1,4 +1,5 @@
-import React from 'react'
+import React, { useState } from 'react'
+import { composeReply, paragraphsOf } from './reply.js'
 
 /* Red and green must survive video compression and colour-blind viewers, so a
    badge never carries meaning in its colour alone: it always has an icon, a
@@ -310,21 +311,96 @@ function VerdictCard({ card }) {
           <Badge tone={copy.tone} icon={copy.icon} size="big">{copy.text}</Badge>
         </header>
 
-        <div className="handover">
-          <article className="pane">
-            <h3 className="pane-title">For the developer — PR body</h3>
-            <div className="pane-body markdownish">{handover.dev_summary}</div>
-          </article>
-          <article className="pane">
-            <h3 className="pane-title">For the client — reply</h3>
-            <div className="pane-body">{handover.client_reply}</div>
-          </article>
-        </div>
+        <article className="pane">
+          <h3 className="pane-title">For the developer — PR body</h3>
+          <div className="pane-body markdownish">{handover.dev_summary}</div>
+        </article>
 
         <p className="meta-line">
           {data.calls} model calls · ${Number(data.usd || 0).toFixed(4)} · {data.wall_clock_s}s ·
           no auto-merge, a human presses merge
         </p>
+      </section>
+    </li>
+  )
+}
+
+/* --- the reply to the client ------------------------------------------------
+   Not a developer tool. This is the artefact a support team actually sends, so
+   it is laid out like the email it is: sender line, greeting, plain
+   paragraphs, no monospace anywhere, and room to breathe. */
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    // Clipboard API needs a secure context; a demo served over plain http on a
+    // LAN does not have one. Fall back to the old way rather than do nothing.
+    try {
+      const scratch = document.createElement('textarea')
+      scratch.value = text
+      scratch.setAttribute('readonly', '')
+      scratch.style.position = 'fixed'
+      scratch.style.opacity = '0'
+      document.body.appendChild(scratch)
+      scratch.select()
+      const ok = document.execCommand('copy')
+      document.body.removeChild(scratch)
+      return ok
+    } catch {
+      return false
+    }
+  }
+}
+
+function ClientReplyCard({ card }) {
+  const [copied, setCopied] = useState(false)
+  const handover = card.data.handover || {}
+  const reply = composeReply(handover.client_reply, card.data.reporter_name)
+  const paragraphs = paragraphsOf(reply)
+  const recipient = card.data.reporter_name || 'the customer who reported this'
+
+  return (
+    <li className="tl-item tl-reply">
+      <span className="tl-dot" aria-hidden="true" />
+      <section className="reply">
+        <header className="reply-head">
+          <div className="reply-from">
+            <span className="avatar" aria-hidden="true">S</span>
+            <div>
+              <div className="reply-sender">Support</div>
+              <div className="reply-to">to {recipient}</div>
+            </div>
+          </div>
+          <div className="reply-actions">
+            <span className="draft-chip">Draft — a person sends it</span>
+            <button
+              type="button"
+              className="copy"
+              onClick={async () => {
+                if (await copyText(reply)) {
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 2000)
+                }
+              }}
+            >
+              {copied ? '✓ Copied' : 'Copy reply'}
+            </button>
+          </div>
+        </header>
+
+        <div className="reply-body">
+          {paragraphs.map((paragraph, index) => (
+            <p key={index}>{paragraph}</p>
+          ))}
+        </div>
+
+        <footer className="reply-foot">
+          Written for the person who reported the bug, not for the developer who
+          fixes it. No jargon, no file names, and it never promises a fix the
+          verdict does not support.
+        </footer>
       </section>
     </li>
   )
@@ -350,6 +426,7 @@ const BY_KIND = {
   fix: FixCard,
   report: ReportCard,
   verdict: VerdictCard,
+  client_reply: ClientReplyCard,
   error: ErrorCard,
 }
 
