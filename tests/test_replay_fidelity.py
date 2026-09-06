@@ -287,6 +287,21 @@ def test_the_committed_cassettes_exist():
     assert runs, "recorded_runs.json lists no runs"
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "eval/recorded_runs.json predates 4d5cd5b, which narrowed the intake clarify "
+        "gate to CRITICAL_FACTS. The one recorded case (shopcart-free-shipping) has "
+        "missing=['expected_behaviour'] and confidence 0.72; that field is no longer "
+        "critical, so the run now continues to localise instead of ending at clarify. "
+        "Only two cassettes were recorded (ReportFacts, ClarifyingQuestion), so replay "
+        "dies with 'No cassette' at the localise node -- and even with cassettes the "
+        "recorded verdict needs_clarification is now unreachable for this input. The "
+        "fix is a re-record (task C4: live Bedrock, Engineer C), not a code change. "
+        "strict=True on purpose: the moment the recording is refreshed this XPASSes "
+        "and fails the build, which is the reminder to delete this marker."
+    ),
+)
 def test_every_recorded_case_replays_to_its_recorded_verdict():
     """`LLM_PROVIDER=fake make eval` must reproduce the recording, offline."""
     for recorded in _recorded_runs():
