@@ -107,17 +107,18 @@ the whole integration.
 
 Do this **once**, screen-record it while it happens, and tear it down the same
 hour. You are deploying to satisfy the technical-quality criterion and to have
-real deployment footage, not to run production.
+real deployment footage, not to run production. Read the whole stage before you
+start: one of the two deployment types silently disables the agent's own safety
+check, and which one you want depends on what the footage has to show.
 
 **Run every command from the repository root.** `agentcore configure` uses your
-current directory as the Docker build context — its generated Dockerfile ends
-`COPY . .` — and derives the module to run from the entrypoint path *relative to
-that directory*. Running it from `src/repro/agentcore` therefore packages two
-files, `agent.py` and `__init__.py`, and nothing else: no dependency file (the
-CLI stops and asks for one), and no `repro` package. Answering that prompt does
-not save you, because the build then succeeds and the **runtime** dies with
-`ModuleNotFoundError: No module named 'repro'` — after the ten-minute billable
-build.
+current directory as the build context and derives what it runs from the
+entrypoint path *relative to that directory*. Run from `src/repro/agentcore` it
+packages two files, `agent.py` and `__init__.py`, and nothing else: no
+dependency file (the CLI stops and asks for one), and no `repro` package.
+Answering that prompt does not save you — the build then SUCCEEDS and the
+runtime dies with `ModuleNotFoundError: No module named 'repro'`, after the
+billable build.
 
 ```bash
 pip install 'bedrock-agentcore-starter-toolkit==0.3.12'   # also pinned in requirements.txt
@@ -127,14 +128,77 @@ agentcore configure \
   --entrypoint src/repro/agentcore/agent.py \
   --requirements-file requirements.txt \
   --region <the region check_bedrock chose>
-#   writes .bedrock_agentcore.yaml, creates the IAM execution role, provisions S3
-
-grep -E '^CMD' Dockerfile
-#   must print: CMD ["python", "-m", "src.repro.agentcore.agent"]
-#   Anything else means the build context is wrong. Stop and re-run configure.
 ```
 
-### Prove the image locally before you pay for it
+It is interactive. The answer that matters is the first one:
+
+```
+Select deployment type:
+  1. Direct Code Deploy (recommended) - Python only, no Docker required
+  2. Container - For custom runtimes or complex dependencies
+```
+
+Everything else can take its default (auto-create the execution role and the S3
+bucket, IAM auth, short-term memory). It will also tell you Python 3.14 is not
+supported and pick 3.11, which is fine — `requires-python` is `>=3.11`.
+
+Then check what it wrote. This replaces looking for a Dockerfile, which only
+exists on the Container path:
+
+```bash
+grep -E 'entrypoint:|source_path:|deployment_type:' .bedrock_agentcore.yaml
+#   source_path: must be the REPOSITORY ROOT. That is the whole check.
+#   entrypoint:  must be .../src/repro/agentcore/agent.py
+```
+
+`configure` also prints `Expanding build context to include dependencies:
+.../src/repro/agentcore -> .../BuckyAgent`. That line is it doing the right
+thing.
+
+### Choose the deployment type with your eyes open
+
+**Direct Code Deploy** ships a code zip. Its file list is filtered by a
+`dockerignore.template` **bundled inside the toolkit** — not by any
+`.dockerignore` you write — and that template excludes `tests/` at *every*
+depth, pruning the directory during the walk. Run the toolkit's own packager
+logic over this repo and the demo project arrives like this:
+
+```
+shopcart files that ship:
+    fixtures/demo_repos/shopcart/shopcart/__init__.py
+    fixtures/demo_repos/shopcart/shopcart/pricing.py
+  shopcart TESTS shipped: NONE
+```
+
+That breaks the product's safety property in a way that still looks like it
+works. `run_suite()` returns `no tests ran` (exit 5) on arrival; once the agent
+writes its own repro test, the "existing suite" it verifies a patch against
+consists solely of the test it just wrote. `must_not_break` from
+`fixtures/BUGS.md` stops being checked by anything, and the run still reports a
+verdict. **A deployed Direct Code Deploy agent cannot honestly return
+`reproduced_and_fixed`.**
+
+That is acceptable if Stage 3 is for footage — record the deploy, invoke it,
+tear it down, and demo the real red→green from `make demo` or the local API,
+which have the whole fixture. Do not claim on camera that the cloud endpoint
+produced the fix.
+
+**Container** builds an image and *does* honour a `.dockerignore` you write
+(the toolkit only generates one if none exists). Take this path if the cloud
+endpoint has to do a real end-to-end run:
+
+```bash
+TOOLKIT=$(python -c 'import bedrock_agentcore_starter_toolkit as t, os; print(os.path.dirname(t.__file__))')
+cp "$TOOLKIT/utils/runtime/templates/dockerignore.template" .dockerignore
+sed -i '/^tests\/$/d' .dockerignore      # keep fixtures/demo_repos/shopcart/tests
+grep -c '^tests/$' .dockerignore          # must print 0
+
+# then re-run configure and choose 2. Container
+```
+
+It costs a Docker build and about fifteen extra minutes.
+
+### Prove it locally before you pay for it
 
 ```bash
 agentcore launch --local --env PYTHONPATH=src --env LLM_PROVIDER=stub
@@ -145,10 +209,9 @@ curl -s -X POST localhost:8080/invocations -H 'Content-Type: application/json' \
 ```
 
 `LLM_PROVIDER=stub` needs no AWS and no cassettes (see `agent.py`), so this is
-free and offline. It is where a broken `PYTHONPATH` costs you two minutes
-instead of a billable build. While the container is up, confirm the demo repo
-actually shipped — the toolkit auto-generates a `.dockerignore` that excludes
-`tests/`, and the agent needs shopcart's suite to verify a patch:
+free and offline, and it is where a broken `PYTHONPATH` costs two minutes
+instead of a billable build. Direct Code Deploy runs this through `uv`, so `uv`
+must be on your PATH. On the Container path, also confirm the fixture survived:
 
 ```bash
 docker run --rm --entrypoint ls <image> fixtures/demo_repos/shopcart/tests
@@ -164,23 +227,26 @@ at hour 26 — set `AGENTCORE_SUPPRESS_RECOMMENDATION=1` and keep moving.
 
 ```bash
 agentcore launch --env PYTHONPATH=src --env LLM_PROVIDER=bedrock
-#   uploads source, builds the image, pushes to ECR, waits for READY
+#   uploads source, builds, waits for READY
 #   ~10 minutes. Billing starts here. Record your screen for this.
 
 agentcore status
 agentcore invoke '{"report": {"run_id":"live","raw_text":"...","repo_path":"fixtures/demo_repos/shopcart"}}'
 ```
 
-Both `--env` flags are load-bearing, and neither can be dropped:
+Both `--env` flags are load-bearing on **both** deployment types, and neither
+can be dropped:
 
-* `PYTHONPATH=src` — `repro` is not pip-installed (deliberately: see the Makefile
-  header), so without it the container cannot import its own package. It cannot
-  be fixed through the requirements file either. The generated Dockerfile copies
-  *only* the dependency file and installs it **before** `COPY . .`, so a `.`
-  entry in `requirements.txt` fails with no `pyproject.toml` in the image yet;
-  and pointing `--requirements-file` at `pyproject.toml` installs `repro` but
-  none of the runtime dependencies, because that file has no
-  `[project.dependencies]`.
+* `PYTHONPATH=src` — `repro` is deliberately not pip-installed (see the Makefile
+  header), and neither deployment type puts the repo root on `sys.path`:
+  Container runs `python -m src.repro.agentcore.agent`, Direct Code Deploy runs
+  the script by path, so `sys.path[0]` is `src/repro/agentcore/`. Both fail on
+  `from repro import clients` without it. It cannot be fixed through the
+  requirements file either — the generated Dockerfile copies *only* the
+  dependency file and installs it BEFORE `COPY . .`, so a `.` entry fails with
+  no `pyproject.toml` in the image yet, and pointing `--requirements-file` at
+  `pyproject.toml` installs `repro` but none of the runtime dependencies,
+  because that file has no `[project.dependencies]`.
 * `LLM_PROVIDER=bedrock` — `agent.py` defaults to `fake`, which replays
   cassettes. Deployed without this you get "No cassette", not a real run.
 
