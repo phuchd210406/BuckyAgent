@@ -157,6 +157,37 @@ thing.
 
 ### Choose the deployment type with your eyes open
 
+Decide before you answer that prompt: **the choice is one-way per agent.** The
+toolkit refuses to change it later —
+
+```
+❌ Cannot change deployment type from 'direct_code_deploy' to 'container'
+   for existing agent 'src_repro_agentcore_agent'.
+```
+
+— and the two types differ in what they can verify for free, which matters more
+than it looks. Check first:
+
+```bash
+command -v docker >/dev/null && docker info >/dev/null 2>&1 \
+  && echo "docker usable"  || echo "no docker: Container cannot be dry-run locally"
+command -v uv >/dev/null && echo "uv present"  || echo "no uv: Direct Code Deploy cannot be dry-run locally"
+```
+
+| | Direct Code Deploy | Container |
+|---|---|---|
+| Cloud build | code zip, uploaded | ARM64 via CodeBuild — **no local Docker needed** |
+| Free local dry run | needs `uv` | needs **Docker** |
+| `fixtures/.../shopcart/tests` ships | **no** (see below) | yes, with your own `.dockerignore` |
+| Cloud endpoint can return `reproduced_and_fixed` | **no** | yes |
+
+The trap is the second row. On a machine without Docker, Container still
+deploys fine — but you lose the free dry run, so the first time you discover a
+wrong `PYTHONPATH` is ten minutes into a **billable** CodeBuild. On a ~30-minute
+billable budget that is the worse risk, so prefer Direct Code Deploy unless the
+cloud endpoint genuinely has to produce a fix, and if it does, install Docker
+first rather than flying blind.
+
 **Direct Code Deploy** ships a code zip. Its file list is filtered by a
 `dockerignore.template` **bundled inside the toolkit** — not by any
 `.dockerignore` you write — and that template excludes `tests/` at *every*
@@ -196,7 +227,25 @@ grep -c '^tests/$' .dockerignore          # must print 0
 # then re-run configure and choose 2. Container
 ```
 
-It costs a Docker build and about fifteen extra minutes.
+Its cloud build runs on CodeBuild, so no local Docker is required to *deploy* —
+only to dry-run it first. Budget about fifteen extra minutes.
+
+If you already configured this agent as Direct Code Deploy, configure will
+refuse to switch. Clear the local state first — but **check that nothing was
+provisioned before you do**, or you will orphan live resources that keep
+costing money with no config left pointing at them:
+
+```bash
+grep -E 'agent_id:|agent_arn:|execution_role:|s3_path:|ecr_repository:|memory_id:' \
+  .bedrock_agentcore.yaml
+#   every one must be `null`. If any is not, use `agentcore destroy` instead.
+
+rm .bedrock_agentcore.yaml
+rm -rf .bedrock_agentcore/
+```
+
+`configure` only ever says "*Will* auto-create" — nothing exists until `launch`,
+so a config you never launched is safe to delete outright.
 
 ### Prove it locally before you pay for it
 
@@ -210,8 +259,13 @@ curl -s -X POST localhost:8080/invocations -H 'Content-Type: application/json' \
 
 `LLM_PROVIDER=stub` needs no AWS and no cassettes (see `agent.py`), so this is
 free and offline, and it is where a broken `PYTHONPATH` costs two minutes
-instead of a billable build. Direct Code Deploy runs this through `uv`, so `uv`
-must be on your PATH. On the Container path, also confirm the fixture survived:
+instead of a billable build. Do not skip it.
+
+It has a prerequisite that differs by deployment type: Direct Code Deploy runs
+the script through **`uv`**, Container builds and runs the image through
+**Docker**. If the one you chose is missing, this step does not degrade — it
+refuses, and your first real verification becomes the billable launch. On the
+Container path, also confirm the fixture survived:
 
 ```bash
 docker run --rm --entrypoint ls <image> fixtures/demo_repos/shopcart/tests
