@@ -15,4 +15,6 @@ bedrock-agentcore>=0.1.0 ; python_version >= "3.10"
 # Dev
 pytest>=8.0
 pytest-timeout>=2.3
-ruff>=0.5
+# Pinned: an unbounded range means a ruff release can turn CI red with no
+# commit behind it. Bump deliberately, with the lint findings in the diff.
+ruff>=0.16,<0.17

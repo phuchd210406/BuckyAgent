@@ -1,7 +1,6 @@
 """Assembles the graph. OWNER: Engineer A."""
 from __future__ import annotations
 
-from repro.graph.state import GraphState
 from repro.llm.base import LLMClient
 
 

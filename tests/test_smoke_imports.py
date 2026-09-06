@@ -1,5 +1,6 @@
 """Every module must at least import. Catches syntax errors across all five streams."""
 import importlib
+
 import pytest
 
 MODULES = [
