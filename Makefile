@@ -1,4 +1,4 @@
-.PHONY: install test lint lint-fix check-bedrock demo eval record api serve
+.PHONY: install test test-fast lint lint-fix check-bedrock demo eval record api serve
 
 # --- how these recipes find Python -----------------------------------------
 # Recipes run under /bin/sh with whatever PATH you happen to have. Two traps
@@ -21,8 +21,11 @@ export PYTHONPATH := src
 install:
 	python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
-test:
-	LLM_PROVIDER=fake $(PY) -m pytest -q
+test:                     ## The whole suite, including the wall-clock waits
+	LLM_PROVIDER=fake $(PY) -m pytest
+
+test-fast:                ## The inner loop: everything except the wall-clock waits
+	LLM_PROVIDER=fake $(PY) -m pytest -m "not slow"
 
 lint:                     ## EXACTLY what CI runs. Read-only: never edits your tree
 	$(PY) -m ruff check src tests

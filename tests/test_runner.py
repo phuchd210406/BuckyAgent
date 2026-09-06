@@ -124,6 +124,7 @@ def test_plural_errors_are_parsed(make_ws):
 
 
 # --- 5. infinite loop -------------------------------------------------------
+@pytest.mark.slow
 def test_infinite_loop_times_out_and_returns_promptly(make_ws):
     ws = make_ws("hang", {"tests/test_hang.py": "def test_a():\n    while True:\n        pass\n"})
 
@@ -139,6 +140,7 @@ def test_infinite_loop_times_out_and_returns_promptly(make_ws):
     assert "timed out" in r.stderr_tail
 
 
+@pytest.mark.slow
 def test_timeout_kills_the_whole_process_group(make_ws, tmp_path: Path):
     """A grandchild the test spawned must not survive the kill.
 

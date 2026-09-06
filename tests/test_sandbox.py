@@ -6,12 +6,13 @@ if it fails, the agent is editing the user's real repository.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 from pathlib import Path
 
 import pytest
 
-from repro.sandbox.workspace import Workspace
+from repro.sandbox.workspace import KEEP_ENV_VAR, Workspace
 
 SHOPCART = Path(__file__).resolve().parents[1] / "fixtures" / "demo_repos" / "shopcart"
 
@@ -188,3 +189,72 @@ def test_root_itself_and_empty_paths_are_rejected(ws: Workspace):
     for bad in ("", "   ", ".", "shopcart/.."):
         with pytest.raises(ValueError):
             ws.write_file(bad, "pwned")
+
+
+# --- keeping the evidence of a failed run -----------------------------------
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", "  yes  ", "on"])
+def test_keep_env_var_preserves_the_tree(tmp_path: Path, monkeypatch, value: str):
+    monkeypatch.setenv(KEEP_ENV_VAR, value)
+    ws = Workspace(SHOPCART, tmp_path / "roots")
+    root = ws.path
+    ws.write_file("tests/test_generated.py", "def test_x():\n    assert 0\n")
+
+    ws.close()
+
+    assert root.is_dir(), f"{KEEP_ENV_VAR}={value!r} should have kept the workspace"
+    assert (root / "tests" / "test_generated.py").exists(), "the evidence must survive"
+    assert ws.closed is True, "kept is not the same as open: the agent is done with it"
+
+    ws.close()  # still idempotent
+    assert root.is_dir()
+
+
+@pytest.mark.parametrize("value", ["", "0", "false", "no", "off", "please"])
+def test_falsey_keep_values_still_delete(tmp_path: Path, monkeypatch, value: str):
+    monkeypatch.setenv(KEEP_ENV_VAR, value)
+    ws = Workspace(SHOPCART, tmp_path / "roots")
+    root = ws.path
+
+    ws.close()
+
+    assert not root.exists(), f"{KEEP_ENV_VAR}={value!r} is not a request to keep"
+
+
+def test_keep_is_read_at_close_not_at_import(tmp_path: Path, monkeypatch):
+    """Settings evaluates its env defaults once at import; this must not."""
+    ws = Workspace(SHOPCART, tmp_path / "roots")  # flag unset at construction
+    root = ws.path
+
+    monkeypatch.setenv(KEEP_ENV_VAR, "1")
+    ws.close()
+
+    assert root.is_dir()
+
+
+def test_context_manager_honours_keep_even_on_error(tmp_path: Path, monkeypatch):
+    """The exception path is the one where you most need the workspace back."""
+    monkeypatch.setenv(KEEP_ENV_VAR, "1")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        with Workspace(SHOPCART, tmp_path / "roots") as ws:
+            root = ws.path
+            ws.write_file("tests/test_generated.py", "def test_x():\n    assert 0\n")
+            raise RuntimeError("boom")
+
+    assert root.is_dir()
+    assert (root / "tests" / "test_generated.py").exists()
+
+
+def test_kept_workspace_is_logged_with_its_path(tmp_path: Path, monkeypatch, caplog):
+    """A kept workspace nobody is told about is a disk leak, not a debug aid."""
+    monkeypatch.setenv(KEEP_ENV_VAR, "1")
+    ws = Workspace(SHOPCART, tmp_path / "roots")
+    root = ws.path
+
+    with caplog.at_level(logging.WARNING, logger="repro.sandbox"):
+        ws.close()
+        ws.close()  # second close must not log again
+
+    records = [r for r in caplog.records if KEEP_ENV_VAR in r.getMessage()]
+    assert len(records) == 1
+    assert str(root) in records[0].getMessage()

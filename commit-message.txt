@@ -1,32 +1,25 @@
-feat(retrieval): add BM25-style search with client-vocabulary synonym map
+feat(sandbox): add atomic apply_patch/revert_patch with path traversal guards
 
-Implement search() and rank_candidates() in src/repro/retrieval/index.py.
+Implement apply_patch and revert_patch in src/repro/sandbox/patcher.py.
 
-We deliberately do not use a vector database. OpenSearch's minimum
-always-on capacity runs hundreds a month, and our corpus is one repo in
-a temp directory for sixty seconds. Pure Python only.
+apply_patch(ws, patch) -> (applied: bool, message: str):
+- Prefer `git apply --check` then `git apply` inside the workspace when
+  it is a git repo; fall back to a pure-Python unified diff applier
+  otherwise
+- Atomic by construction: snapshot the affected files before applying,
+  and restore them if any hunk fails, so the workspace is byte-identical
+  to its pre-call state on any failure
+- Validate every path in the diff is inside the workspace before
+  applying anything, using the same traversal rules as B1
+- Never raise on a malformed diff; return (False, reason) instead
 
-search(ws, query, k):
-- Walk .py files via repo_facts.list_source_files (using sandbox/fake.py
-  until B5 lands)
-- Score with a simple BM25-style term overlap over identifiers, comments,
-  and docstrings; split identifiers on snake_case and camelCase so a
-  query like "free postage" can reach free_shipping_threshold
-- Maintain a synonym map from client vocabulary to code vocabulary:
-  postage -> shipping/delivery, basket -> cart, voucher/coupon ->
-  promo/discount, sign in -> login/auth, "didn't go through" ->
-  error/exception/fail. This is the highest-value part of the module,
-  since the core problem is that clients and code use different words
-- Snippets are the matching function's body, capped at 60 lines; never
-  a whole file
+revert_patch restores the pre-patch state from the snapshot.
 
-rank_candidates(hits, k):
-- Cap results at MAX_LOCALISE_CANDIDATES
-- Normalise confidence to 0..1
-- Leave rationale empty for the LLM to fill in
+Add tests/test_patcher.py covering:
+- Clean apply
+- Apply then revert returns to the original tree hash
+- A diff with a bad hunk leaves the tree untouched
+- A diff referencing ../../ is rejected
+- A diff touching a nonexistent file is rejected
 
-Add tests/test_retrieval.py asserting that the query built from the
-shopcart client complaint ("charged me postage even though the site
-says free postage over $50") ranks shopcart/pricing.py first. This is
-the module's whole point — if it fails, the agent will never find the
-bug.
+Hash the whole tree before and after for the atomicity tests.

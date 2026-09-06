@@ -9,6 +9,11 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+    # Tests that wait on a real clock (sandbox timeouts). `make test-fast`
+    # deselects them for the inner loop; CI always runs the whole suite.
+    "slow: waits on real wall-clock time; deselect with -m 'not slow'",
+]
 timeout = 120
 addopts = "-q"
 

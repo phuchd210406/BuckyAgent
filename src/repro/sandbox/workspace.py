@@ -1,10 +1,14 @@
 """Isolated, disposable copies of a project. OWNER: Engineer B."""
 from __future__ import annotations
 
+import logging
+import os
 import shutil
 import tempfile
 from pathlib import Path
 from types import TracebackType
+
+LOG = logging.getLogger("repro.sandbox")
 
 # Directories that are never copied into a workspace. `.git` because the agent
 # must not be able to rewrite the user's history, the other three because they
@@ -12,6 +16,21 @@ from types import TracebackType
 IGNORED_NAMES = (".git", ".venv", "__pycache__", "node_modules")
 
 _TRUNCATION_MARKER = "\n\n[... truncated: file is {size} bytes, showing the first {kept} chars ...]"
+
+#: Set this to keep workspaces on disk instead of deleting them in close().
+KEEP_ENV_VAR = "REPRO_KEEP_WORKSPACE"
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def keep_workspaces() -> bool:
+    """True when the operator asked for workspaces to survive ``close()``.
+
+    Read HERE, at close() time, rather than through ``Settings``: that class
+    evaluates its ``os.getenv`` defaults once when the module is first
+    imported, so a value exported later -- or set by monkeypatch in a test --
+    would be silently ignored.
+    """
+    return os.environ.get(KEEP_ENV_VAR, "").strip().lower() in _TRUTHY
 
 
 class Workspace:
@@ -150,11 +169,31 @@ class Workspace:
 
     # --- teardown -----------------------------------------------------------
     def close(self) -> None:
-        """Remove the workspace. Idempotent, and never raises."""
+        """Remove the workspace. Idempotent, and never raises.
+
+        Honours ``REPRO_KEEP_WORKSPACE``: when it is set the tree is left on
+        disk and its path is logged. ``graph.build.run()`` closes the workspace
+        in a ``finally`` even when the graph raised, so without this the
+        evidence of a failed run -- the test the model wrote, the patched
+        files, whatever the patcher left behind -- is deleted before anyone can
+        look at it. Off by default: a kept workspace is a copy of a client's
+        repository sitting in /tmp, which is exactly what close() exists to
+        prevent.
+        """
+        was_open = not self._closed
         self._closed = True
         root = getattr(self, "_root", None)
         if root is None:
             return
+
+        if keep_workspaces():
+            if was_open:
+                # WARNING, not INFO: nothing configures logging in this project
+                # yet, and a kept workspace you are never told about is a disk
+                # leak rather than a debugging aid.
+                LOG.warning("%s is set; keeping workspace %s", KEEP_ENV_VAR, root)
+            return
+
         try:
             shutil.rmtree(root, ignore_errors=True)
         except Exception:  # pragma: no cover - rmtree already swallows errors
