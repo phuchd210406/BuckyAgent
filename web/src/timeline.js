@@ -121,3 +121,13 @@ export function currentStep(cards, status) {
   if (!last) return 'Starting the run'
   return (BETWEEN_STEPS[last.kind] || (() => 'Deciding what to do next'))(last)
 }
+
+
+/** The most recent bill the stream reported. Every event carries one. */
+export function latestUsage(events) {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const usage = events[i].payload?.usage
+    if (usage) return usage
+  }
+  return null
+}

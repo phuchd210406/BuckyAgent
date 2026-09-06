@@ -12,8 +12,11 @@ export const SHOPCART_COMPLAINT =
   'the site says free postage over $50. my basket was definitely more than $50. ' +
   'can you sort it out, we have customers complaining'
 
-export default function RunForm({ rawText, setRawText, repoPath, setRepoPath, onRun, status }) {
+export default function RunForm({
+  rawText, setRawText, repoPath, setRepoPath, onRun, onReset, status, runId,
+}) {
   const running = status === 'running'
+  const started = status !== 'idle'
 
   return (
     <form
@@ -56,9 +59,22 @@ export default function RunForm({ rawText, setRawText, repoPath, setRepoPath, on
         <span className="field-hint">Copied to a throwaway sandbox. Never written to.</span>
       </label>
 
-      <button className="run" type="submit" disabled={running || !rawText.trim()}>
-        {running ? 'Running — watch the timeline' : 'Run'}
-      </button>
+      <div className="actions">
+        <button className="run" type="submit" disabled={running || !rawText.trim()}>
+          {running ? 'Running — watch the timeline' : started ? 'Run again' : 'Run'}
+        </button>
+        {started && (
+          <button
+            className="reset"
+            type="button"
+            onClick={onReset}
+            title="Clear the screen for another take. No page reload, no server restart."
+          >
+            Reset
+          </button>
+        )}
+      </div>
+      {runId && <div className="run-id">run {runId.slice(0, 8)}</div>}
     </form>
   )
 }

@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import AsyncIterator, Optional
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
@@ -34,6 +35,30 @@ from repro.graph.build import run as run_graph
 LOG = logging.getLogger("repro.api")
 
 app = FastAPI(title="Repro", version="0.1.0")
+
+#: The deployed frontend (Vercel) and the backend (a laptop behind a tunnel) are
+#: different origins, so the browser needs to be told this is allowed. Exact
+#: origins from the environment, plus every vercel.app preview URL, because each
+#: deploy gets its own hostname and pinning one would break the next.
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "REPRO_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+    ).split(",")
+    if origin.strip()
+]
+CORS_ORIGIN_REGEX = os.getenv("REPRO_CORS_ORIGIN_REGEX", r"https://.*\.vercel\.app")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_origin_regex=CORS_ORIGIN_REGEX,
+    # No cookies and no auth header: nothing here is credentialed, and asking
+    # for credentials would forbid the wildcard-ish regex above.
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["content-type"],
+)
 
 #: Multiplies every scripted delay on the mock path. 1.0 is demo pacing.
 TIME_SCALE = float(os.getenv("REPRO_MOCK_SPEED", "1.0"))

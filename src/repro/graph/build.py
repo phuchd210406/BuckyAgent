@@ -276,7 +276,12 @@ def _guarded(name: str, node, llm: _MeteredLLM, sandbox: Sandbox, emit):
 
         run_id = state["report"].run_id
         attempt_no = (state.get(counter, 0) + 1) if counter in ("repro_count", "fix_count") else None
-        emit(events.node_started(run_id, name, attempt_no, _CAP_FOR.get(name)))
+        emit(
+            events.with_usage(
+                events.node_started(run_id, name, attempt_no, _CAP_FOR.get(name)),
+                state.get("usage") or TokenUsage(),
+            )
+        )
 
         llm.take()  # drop anything stray so this node is charged for its own calls
         if name in SANDBOX_NODES:
@@ -306,21 +311,26 @@ _CAP_FOR = {"repro": MAX_REPRO_ATTEMPTS, "fix": _MAX_FIX}
 
 def _emit_for(emit, run_id: str, name: str, update: dict) -> None:
     """Turn what a node returned into events. Driven by the update, not a guess."""
+    spent = update.get("usage")
+
+    def send(event) -> None:
+        emit(events.with_usage(event, spent))
+
     if update.get("facts") is not None:
-        emit(events.intake_finished(run_id, update["facts"]))
+        send(events.intake_finished(run_id, update["facts"]))
     for question in update.get("questions", []):
-        emit(events.clarify_asked(run_id, question))
+        send(events.clarify_asked(run_id, question))
     hypotheses = update.get("hypotheses", [])
     for hypothesis in hypotheses:
-        emit(events.hypothesis_found(run_id, hypothesis))
+        send(events.hypothesis_found(run_id, hypothesis))
     if hypotheses:
-        emit(events.localise_finished(run_id, len(hypotheses)))
+        send(events.localise_finished(run_id, len(hypotheses)))
     for attempt in update.get("repro_attempts", []):
-        emit(events.repro_attempted(run_id, attempt))
+        send(events.repro_attempted(run_id, attempt))
     for attempt in update.get("fix_attempts", []):
-        emit(events.fix_attempted(run_id, attempt))
+        send(events.fix_attempted(run_id, attempt))
     if name == "report":
-        emit(events.report_finished(run_id))
+        send(events.report_finished(run_id))
 
 
 def build_graph(llm: LLMClient, sandbox: Sandbox | None = None, on_event: EventSink | None = None):

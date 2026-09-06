@@ -5,14 +5,27 @@
       "after_s": 0.0,
       "type": "run_started",
       "label": "Run started",
-      "payload": {}
+      "payload": {
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "calls": 0,
+          "usd": 0.0
+        }
+      }
     },
     {
       "after_s": 0.1,
       "type": "node_started",
       "label": "Reading the report",
       "payload": {
-        "node": "intake"
+        "node": "intake",
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "calls": 0,
+          "usd": 0.0
+        }
       }
     },
     {
@@ -35,6 +48,12 @@
             "environment"
           ],
           "confidence": 0.78
+        },
+        "usage": {
+          "input_tokens": 2400,
+          "output_tokens": 320,
+          "calls": 1,
+          "usd": 0.004
         }
       }
     },
@@ -43,7 +62,13 @@
       "type": "node_started",
       "label": "Searching the code",
       "payload": {
-        "node": "localise"
+        "node": "localise",
+        "usage": {
+          "input_tokens": 2400,
+          "output_tokens": 320,
+          "calls": 1,
+          "usd": 0.004
+        }
       }
     },
     {
@@ -54,7 +79,13 @@
         "file_path": "shopcart/pricing.py",
         "symbol": "total",
         "rationale": "total() is what the checkout charges. It adds a flat postage line after the free-postage branch has already run.",
-        "confidence": 0.79
+        "confidence": 0.79,
+        "usage": {
+          "input_tokens": 6200,
+          "output_tokens": 580,
+          "calls": 2,
+          "usd": 0.0091
+        }
       }
     },
     {
@@ -65,7 +96,13 @@
         "file_path": "shopcart/pricing.py",
         "symbol": "shipping_cost",
         "rationale": "Owns the $50 threshold the client quoted. Reached from 'free postage over $50' through the shipping/postage synonym.",
-        "confidence": 0.58
+        "confidence": 0.58,
+        "usage": {
+          "input_tokens": 6200,
+          "output_tokens": 580,
+          "calls": 2,
+          "usd": 0.0091
+        }
       }
     },
     {
@@ -76,7 +113,13 @@
         "file_path": "shopcart/cart.py",
         "symbol": "subtotal",
         "rationale": "Decides the number the threshold is compared against. Only wrong if the basket total itself is wrong, which the client did not say.",
-        "confidence": 0.31
+        "confidence": 0.31,
+        "usage": {
+          "input_tokens": 6200,
+          "output_tokens": 580,
+          "calls": 2,
+          "usd": 0.0091
+        }
       }
     },
     {
@@ -85,7 +128,13 @@
       "label": "3 candidates ranked",
       "payload": {
         "node": "localise",
-        "candidates": 3
+        "candidates": 3,
+        "usage": {
+          "input_tokens": 6200,
+          "output_tokens": 580,
+          "calls": 2,
+          "usd": 0.0091
+        }
       }
     },
     {
@@ -95,7 +144,13 @@
       "payload": {
         "node": "repro",
         "attempt_no": 1,
-        "of": 3
+        "of": 3,
+        "usage": {
+          "input_tokens": 6200,
+          "output_tokens": 580,
+          "calls": 2,
+          "usd": 0.0091
+        }
       }
     },
     {
@@ -113,7 +168,13 @@
         "errors": 0,
         "duration_s": 1.22,
         "stdout_tail": "tests/test_repro_free_postage.py .                            [100%]\n\n1 passed in 0.31s\n",
-        "reasoning": "The test ran and PASSED, so it reproduced nothing. shipping_cost() is correct on its own: it returns 0.00 for a $62.50 basket. The client was charged anyway, so the fault is in whatever adds postage to the total, not in the function that decides whether postage is free. Next attempt must assert on total(), which is the number the customer actually pays."
+        "reasoning": "The test ran and PASSED, so it reproduced nothing. shipping_cost() is correct on its own: it returns 0.00 for a $62.50 basket. The client was charged anyway, so the fault is in whatever adds postage to the total, not in the function that decides whether postage is free. Next attempt must assert on total(), which is the number the customer actually pays.",
+        "usage": {
+          "input_tokens": 9300,
+          "output_tokens": 1300,
+          "calls": 3,
+          "usd": 0.0158
+        }
       }
     },
     {
@@ -123,7 +184,13 @@
       "payload": {
         "node": "repro",
         "attempt_no": 2,
-        "of": 3
+        "of": 3,
+        "usage": {
+          "input_tokens": 9300,
+          "output_tokens": 1300,
+          "calls": 3,
+          "usd": 0.0158
+        }
       }
     },
     {
@@ -141,7 +208,13 @@
         "errors": 0,
         "duration_s": 1.29,
         "stdout_tail": "tests/test_repro_free_postage.py F                            [100%]\n\n=================================== FAILURES ===================================\n________________ test_basket_over_the_threshold_is_not_charged_postage _________\nE       assert 67.49 == 62.5\nE        +  where 67.49 = total(Basket(items=[('jacket', 49.0), ('socks', 13.5)]))\n\n1 failed in 0.34s\n",
-        "reasoning": "The test ran and failed on the assertion, and the failure is the client's complaint in numbers: a $62.50 basket billed at $67.49, which is exactly $4.99 of postage that should have been free."
+        "reasoning": "The test ran and failed on the assertion, and the failure is the client's complaint in numbers: a $62.50 basket billed at $67.49, which is exactly $4.99 of postage that should have been free.",
+        "usage": {
+          "input_tokens": 12900,
+          "output_tokens": 2080,
+          "calls": 4,
+          "usd": 0.0233
+        }
       }
     },
     {
@@ -151,7 +224,13 @@
       "payload": {
         "node": "fix",
         "attempt_no": 1,
-        "of": 3
+        "of": 3,
+        "usage": {
+          "input_tokens": 12900,
+          "output_tokens": 2080,
+          "calls": 4,
+          "usd": 0.0233
+        }
       }
     },
     {
@@ -170,7 +249,13 @@
         "target_test_passed": 1,
         "suite_green": true,
         "suite_passed": 47,
-        "reasoning": "The repro test went red to green and all 47 pre-existing tests stayed green."
+        "reasoning": "The repro test went red to green and all 47 pre-existing tests stayed green.",
+        "usage": {
+          "input_tokens": 17000,
+          "output_tokens": 2980,
+          "calls": 6,
+          "usd": 0.0319
+        }
       }
     },
     {
@@ -178,7 +263,13 @@
       "type": "node_started",
       "label": "Writing the handover",
       "payload": {
-        "node": "report"
+        "node": "report",
+        "usage": {
+          "input_tokens": 17000,
+          "output_tokens": 2980,
+          "calls": 6,
+          "usd": 0.0319
+        }
       }
     },
     {
@@ -186,7 +277,13 @@
       "type": "node_finished",
       "label": "Handover written",
       "payload": {
-        "node": "report"
+        "node": "report",
+        "usage": {
+          "input_tokens": 19104,
+          "output_tokens": 3362,
+          "calls": 7,
+          "usd": 0.035914
+        }
       }
     },
     {
@@ -195,12 +292,18 @@
       "label": "Reproduced and fixed",
       "payload": {
         "verdict": "reproduced_and_fixed",
-        "usd": 0.0359,
+        "usd": 0.035914,
         "calls": 7,
         "wall_clock_s": 33.2,
         "handover": {
           "dev_summary": "## Free postage over $50 was never applied\n\n**Root cause.** `shopcart/pricing.py::total` calls `shipping_cost()` and then discards the result, adding `FLAT_POSTAGE` to every order. The threshold logic was correct all along; nothing downstream used it.\n\n**Reproduction.** `tests/test_repro_free_postage.py` asserts on `total()` rather than on the helper. It fails on `main` with `assert 67.49 == 62.5` and passes with this patch.\n\n**Verification.** Repro test red to green; the 47 pre-existing tests stayed green, including `tests/test_pricing.py`.\n\n**Note on the first attempt.** Attempt 1 asserted `shipping_cost(62.50) == 0` and passed, which is why it was rejected: the helper was never the bug. Changing `>` to `>=` here would also pass a test and fix nothing.\n",
           "client_reply": "Thank you for reporting this, and sorry you were charged for postage you should not have paid.\n\nYou were right: your basket was over $50, so postage should have been free. We were able to see the problem ourselves. Our checkout worked out that your postage should be free, and then added the standard $4.99 anyway. That is our mistake, and it would have affected every order over $50, not just yours.\n\nA fix is written and with a developer for review. Once it is released, orders over $50 will have no postage added. Someone from support will be in touch about refunding the $4.99 you were charged."
+        },
+        "usage": {
+          "input_tokens": 19104,
+          "output_tokens": 3362,
+          "calls": 7,
+          "usd": 0.035914
         }
       }
     }
@@ -325,7 +428,7 @@
       "input_tokens": 19104,
       "output_tokens": 3362,
       "calls": 7,
-      "usd": 0.0359
+      "usd": 0.035914
     },
     "wall_clock_s": 33.2
   }

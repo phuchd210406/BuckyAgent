@@ -20,6 +20,7 @@ from repro.contracts import (
     ReproAttempt,
     RunRecord,
     StreamEvent,
+    TokenUsage,
 )
 
 #: Human labels for the node names the graph uses.
@@ -33,12 +34,24 @@ NODE_LABELS = {
 }
 
 
+def with_usage(event: StreamEvent, usage: TokenUsage | None) -> StreamEvent:
+    """Stamp the run's bill so far onto an event.
+
+    Cost is only interesting while it is still being spent, so it rides on every
+    event rather than arriving with the verdict. The graph stamps it at each
+    node boundary, which is the only moment it changes.
+    """
+    if usage is not None:
+        event.payload["usage"] = usage.model_dump(mode="json")
+    return event
+
+
 def run_started(report: ClientReport) -> StreamEvent:
     return StreamEvent(
         type="run_started",
         run_id=report.run_id,
         label="Run started",
-        payload={"repo_path": report.repo_path},
+        payload={"repo_path": report.repo_path, "usage": TokenUsage().model_dump(mode="json")},
     )
 
 
@@ -158,6 +171,7 @@ def verdict_reached(record: RunRecord, reporter_name: str | None = None) -> Stre
             "wall_clock_s": record.wall_clock_s,
             "handover": record.handover.model_dump(mode="json") if record.handover else None,
             "reporter_name": reporter_name,
+            "usage": record.usage.model_dump(mode="json"),
         },
     )
 

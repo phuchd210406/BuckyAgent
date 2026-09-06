@@ -41,3 +41,58 @@ run.
   colour-blind.
 * **No spinner-only states.** Every moment names its step, including the gaps
   between nodes where the routers run.
+
+
+## Deploying the frontend
+
+Vercel free tier, so the UI stays off the AWS bill entirely. The project lives
+in `web/`, and `vercel.json` sets the build; Vercel detects Vite on its own.
+
+```sh
+cd web
+vercel login          # once
+vercel link           # once, from web/ — this directory is the project root
+vercel --prod
+```
+
+### The one thing that will catch you out
+
+`VITE_API_BASE` is baked in **at build time, by Vercel's builder**, not read at
+runtime. Setting it locally does nothing: Vercel rebuilds from source and your
+local `dist/` is ignored. It has to be a project environment variable:
+
+```sh
+vercel env add VITE_API_BASE production   # e.g. https://your-tunnel.ngrok-free.app
+vercel --prod                             # a redeploy is required; a refresh is not enough
+```
+
+With it unset the app calls its own origin, gets Vercel's 404 HTML back, and
+shows "Cannot reach the backend" — which is at least honest, but it is not what
+you want thirty seconds into a take.
+
+Anonymous `vercel deploy --temporary` deployments **ignore `--build-env`**, so
+that path cannot be pointed at a backend at all. Log in first.
+
+### Backend, over a tunnel
+
+The backend stays on a laptop; only the frontend is deployed.
+
+```sh
+make api                     # or MOCK=1 make api to rehearse
+ngrok http 8000              # or: ssh -R 80:localhost:8000 nokey@localhost.run
+```
+
+Then set `VITE_API_BASE` to the tunnel URL and redeploy. CORS is already handled
+for `*.vercel.app` — including preview URLs, which get a fresh hostname per
+deploy. Other origins go in `REPRO_CORS_ORIGINS` (comma-separated).
+
+### Check it before recording day, not on it
+
+```sh
+bash scripts/verify_deploy.sh                       # cross-origin, all local
+bash scripts/verify_tunnel.sh https://you.vercel.app # through a real public tunnel
+```
+
+Both assert the preflight, the cross-origin POST, the SSE headers, the event
+count, the verdict and the cost figures. `verify_deploy.sh` also greps the built
+bundle to confirm the API base actually reached it.

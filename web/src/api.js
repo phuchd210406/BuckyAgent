@@ -1,3 +1,8 @@
+// Empty in dev: Vite proxies /runs to the API, so the browser stays same-origin.
+// Set VITE_API_BASE at build time to point a deployed frontend (Vercel) at a
+// backend somewhere else (an ngrok tunnel, say), which needs CORS on that side.
+export const API_BASE = (import.meta.env?.VITE_API_BASE || '').replace(/\/$/, '')
+
 // The API sets the SSE `event:` field to the StreamEvent type, so `onmessage`
 // never fires -- every type needs its own listener.
 const EVENT_TYPES = [
@@ -6,13 +11,13 @@ const EVENT_TYPES = [
 ]
 
 export async function startRun({ rawText, repoPath }) {
-  const response = await fetch('/runs', {
+  const response = await fetch(`${API_BASE}/runs`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ raw_text: rawText, repo_path: repoPath }),
   })
   if (!response.ok) {
-    throw new Error(`POST /runs failed: ${response.status} ${await response.text()}`)
+    throw new Error(`the backend refused the run (${response.status}): ${await response.text()}`)
   }
   return response.json()
 }
@@ -26,7 +31,7 @@ export async function startRun({ rawText, repoPath }) {
  * forever.
  */
 export function followRun(runId, { onEvent, onDone, onError }) {
-  const source = new EventSource(`/runs/${runId}/events`)
+  const source = new EventSource(`${API_BASE}/runs/${runId}/events`)
   let finished = false
 
   const close = () => {
@@ -56,14 +61,16 @@ export function followRun(runId, { onEvent, onDone, onError }) {
   source.onerror = () => {
     if (finished) return // a clean close after the verdict
     close()
-    onError(new Error('the event stream dropped before the run finished'))
+    // Not a crash and not the end of the run: the server keeps going and keeps
+    // the record. Reconnecting replays the whole story from the first event.
+    onError({ kind: 'connection_lost', runId })
   }
 
   return close
 }
 
 export async function fetchRecord(runId) {
-  const response = await fetch(`/runs/${runId}`)
+  const response = await fetch(`${API_BASE}/runs/${runId}`)
   if (response.status === 202) return null // still running
   if (!response.ok) throw new Error(`GET /runs/${runId} failed: ${response.status}`)
   return response.json()
