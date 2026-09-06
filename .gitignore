@@ -9,3 +9,5 @@ node_modules/
 web/dist/
 runs/
 .bedrock_agentcore.yaml
+# FakeLLM writes unmatched prompts here to be diffed. Debug output, not cassettes.
+src/repro/llm/cassettes/_misses/

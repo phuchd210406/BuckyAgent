@@ -349,6 +349,12 @@ class RecordingLLM:
             self._write(
                 cassette_key(system, user, "raw"),
                 {
+                    # The prompt is stored alongside the reply so a cassette can
+                    # say what produced it. The key is a hash of the prompt, not
+                    # of this file, so adding these fields leaves every existing
+                    # cassette findable.
+                    "system": system,
+                    "user": user,
                     "text": response.text,
                     "stop_reason": response.stop_reason,
                     "usage": response.usage.model_dump(),
@@ -366,6 +372,12 @@ class RecordingLLM:
             self._write(
                 cassette_key(system, user, schema.__name__),
                 {
+                    # The prompt that produced this reply. Without it a cassette
+                    # is a hash with no way back to the words behind it, and a
+                    # miss can only be diagnosed by guessing which edit moved
+                    # the key. See FakeLLM._explain_miss, which diffs against these.
+                    "system": system,
+                    "user": user,
                     # `text` is the VALIDATED object, because that is what
                     # FakeLLM feeds straight to model_validate_json. The literal
                     # reply can be fenced, or be the second half of a repair

@@ -14,6 +14,7 @@ would hurt to get wrong in the demo:
 from __future__ import annotations
 
 import json
+import pathlib
 from dataclasses import replace
 from unittest import mock
 
@@ -337,3 +338,98 @@ def test_explicit_enabled_beats_the_setting(monkeypatch, tmp_path):
     recorder = RecordingLLM(llm(reply(GOOD)), cassette_dir=tmp_path, enabled=True)
     recorder.structured(system="sys", user="usr", schema=Hypothesis)
     assert recorder.written  # a caller that asks to record, records
+
+
+# ---------------------------------------------------------------------------
+# Diagnosing a cassette miss
+#
+# Written after a real incident: 4d5cd5b narrowed the intake clarify gate, the
+# run continued to a node nothing was recorded for, and CI failed with
+# "No cassette c752f0510a57273a" -- sixteen hex characters and nothing else.
+# The prompt behind a key exists only in memory at the moment of the miss, so
+# if it is not captured there it is not recoverable at all.
+# ---------------------------------------------------------------------------
+def test_a_miss_writes_the_prompt_that_missed(tmp_path):
+    fake = FakeLLM(tmp_path)
+
+    with pytest.raises(SchemaValidationError, match="No cassette"):
+        fake.structured(system="a system prompt", user="a user turn", schema=Hypothesis)
+
+    key = cassette_key("a system prompt", "a user turn", "Hypothesis")
+    dumped = tmp_path / "_misses" / f"{key}.json"
+    assert dumped.is_file(), "the prompt that missed was not written anywhere"
+
+    saved = json.loads(dumped.read_text())
+    assert saved["system"] == "a system prompt"
+    assert saved["user"] == "a user turn"
+    assert saved["schema"] == "Hypothesis"
+    assert fake.misses == [key]
+
+
+def test_the_miss_message_names_the_file_and_the_candidates(tmp_path):
+    """The message has to be actionable on its own: CI logs are all you get."""
+    recorder = RecordingLLM(llm(reply(GOOD)), cassette_dir=tmp_path, enabled=True)
+    recorder.structured(system="the recorded system", user="the recorded user", schema=Hypothesis)
+    recorded_key = cassette_key("the recorded system", "the recorded user", "Hypothesis")
+
+    with pytest.raises(SchemaValidationError) as exc:
+        FakeLLM(tmp_path).structured(
+            system="the recorded system EDITED", user="the recorded user", schema=Hypothesis
+        )
+
+    message = str(exc.value)
+    assert "No cassette" in message
+    assert "Hypothesis" in message
+    assert "_misses" in message, "the message must say where the prompt was written"
+    assert recorded_key in message, "it must name a cassette to diff against"
+
+
+def test_a_miss_for_an_unrecorded_schema_says_routing_may_have_changed(tmp_path):
+    """The real incident: a node the recording run never reached at all."""
+    with pytest.raises(SchemaValidationError) as exc:
+        FakeLLM(tmp_path).structured(system="s", user="u", schema=Hypothesis)
+
+    assert "Nothing was ever recorded for Hypothesis" in str(exc.value)
+    assert "routing changed" in str(exc.value)
+
+
+def test_the_miss_dump_never_masks_the_real_error(tmp_path, monkeypatch):
+    """A read-only cassette dir must still give "No cassette", not an OSError."""
+    def refuse(*_args, **_kwargs):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(pathlib.Path, "mkdir", refuse)
+
+    with pytest.raises(SchemaValidationError, match="No cassette"):
+        FakeLLM(tmp_path).structured(system="s", user="u", schema=Hypothesis)
+
+
+def test_misses_are_not_mistaken_for_cassettes(tmp_path):
+    """_misses/ sits under the cassette dir; it must not be globbed as one."""
+    fake = FakeLLM(tmp_path)
+    with pytest.raises(SchemaValidationError):
+        fake.structured(system="s", user="u", schema=Hypothesis)
+
+    assert list(tmp_path.glob("*.json")) == [], "a miss dump was left where cassettes are counted"
+    assert (tmp_path / "_misses").is_dir()
+
+
+def test_a_recorded_cassette_remembers_its_own_prompt(tmp_path):
+    """Without this a cassette is a hash with no way back to the words behind it."""
+    recorder = RecordingLLM(llm(reply(GOOD)), cassette_dir=tmp_path, enabled=True)
+    recorder.structured(system="sys", user="usr", schema=Hypothesis)
+
+    saved = json.loads((tmp_path / f"{cassette_key('sys', 'usr', 'Hypothesis')}.json").read_text())
+    assert saved["system"] == "sys"
+    assert saved["user"] == "usr"
+    # And replay still finds it: the key hashes the prompt, not the file.
+    assert FakeLLM(tmp_path).structured(system="sys", user="usr", schema=Hypothesis)[0]
+
+
+def test_a_recorded_completion_remembers_its_prompt_too(tmp_path):
+    recorder = RecordingLLM(llm(reply("ready")), cassette_dir=tmp_path, enabled=True)
+    recorder.complete(system="sys", user="usr")
+
+    saved = json.loads((tmp_path / f"{cassette_key('sys', 'usr', 'raw')}.json").read_text())
+    assert saved["system"] == "sys" and saved["user"] == "usr"
+    assert FakeLLM(tmp_path).complete(system="sys", user="usr").text == "ready"
