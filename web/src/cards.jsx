@@ -12,7 +12,8 @@ function Badge({ tone, icon, children, size = 'normal' }) {
     </span>
   )
 }
-
+// A value that is null, undefined, or the empty string is rendered as "not stated" in a muted style. Otherwise, the value is rendered as-is. This is
+// used for fields that are optional in the intake form.
 export function Value({ children }) {
   const empty = children === null || children === undefined || children === ''
   if (empty) return <span className="not-stated">not stated</span>
