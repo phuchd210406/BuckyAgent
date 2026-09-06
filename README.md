@@ -100,6 +100,7 @@ for the clone and then wiped from the checkout's git config.
 - [Architecture](docs/ARCHITECTURE.md) — the graph, bounds, guardrails, stack rationale
 - [Evaluation](docs/EVALUATION.md) — how we verify correctness; the six metrics
 - [Deploy](docs/DEPLOY.md) — AWS sandbox, AgentCore, budget discipline
+- [Render](docs/RENDER.md) — the backend as a URL that stays up, from a cold start with no accounts
 
 ## Limitations
 

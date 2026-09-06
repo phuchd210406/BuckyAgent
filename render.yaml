@@ -1,0 +1,56 @@
+# Render Blueprint for the Repro BACKEND (FastAPI + SSE).
+#
+# The frontend stays on Vercel (web/vercel.json) — it is static, it is free
+# there, and keeping it off this service means a cold backend never blocks the
+# page from painting.
+#
+# Import this file at https://dashboard.render.com/blueprints, or create the
+# same service by hand from the Dashboard; docs/RENDER.md walks through both.
+services:
+  - type: web
+    name: repro-api
+    runtime: python
+    plan: free
+    region: singapore          # oregon | frankfurt | singapore | ohio — nearest wins
+    branch: main
+    autoDeploy: true
+
+    # `repro` is deliberately NOT pip-installed (see the Makefile header), so
+    # nothing here installs the project itself — PYTHONPATH below is what makes
+    # `import repro` work, exactly as it does locally and in AgentCore.
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn repro.api.main:app --host 0.0.0.0 --port $PORT
+
+    # Render pings this after every deploy and marks the service live only when
+    # it answers. It is also the cheapest thing to curl when a deploy looks odd.
+    healthCheckPath: /healthz
+
+    envVars:
+      # Load-bearing. Without it uvicorn dies on `from repro.clients import ...`
+      # before it ever binds $PORT, and Render reports "port scan timeout".
+      - key: PYTHONPATH
+        value: src
+
+      # pyproject requires >=3.11. Pin it rather than inherit whatever Render's
+      # default happens to be the week you deploy.
+      - key: PYTHON_VERSION
+        value: "3.12.3"
+
+      # fake = replay the committed cassettes. No AWS account, no credentials,
+      # no spend. `bedrock` needs the three AWS_* vars below, and sandbox keys
+      # expire every 12 hours, which a long-lived service cannot survive.
+      - key: LLM_PROVIDER
+        value: fake
+
+      # The Vercel frontend is a different origin, so the browser needs this.
+      # main.py already allows every *.vercel.app preview via regex; this is the
+      # exact production hostname. Set it in the dashboard after the first
+      # frontend deploy, then redeploy.
+      - key: REPRO_CORS_ORIGINS
+        sync: false
+
+      # Real runs copy a repo and run pytest inside the copy. /tmp is the only
+      # reliably writable path on a free instance and it is wiped on restart,
+      # which is what we want — workspaces are disposable by design.
+      - key: REPRO_WORKSPACE
+        value: /tmp/repro-workspaces
