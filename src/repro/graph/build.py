@@ -34,6 +34,7 @@ from repro.contracts import (
     ClientReport,
     LLMResponse,
     Patch,
+    ReportFacts,
     RunRecord,
     StreamEvent,
     TokenUsage,
@@ -54,6 +55,18 @@ LOG = logging.getLogger("repro.graph")
 # Not a loop bound, so it does not live in contracts.py: this is the intake
 # quality gate from docs/ARCHITECTURE.md ("confidence < 0.6 or missing critical").
 CLARIFY_CONFIDENCE_FLOOR = 0.6
+
+#: A field the localiser cannot start without. An absent environment, or one
+#: more step the reporter did not spell out, is not a reason to stop the run and
+#: go back to the client.
+#:
+#: This is the "missing critical" half of the gate above, which was never
+#: implemented: the rule in practice was "any missing", and clarify is terminal,
+#: so one conservative entry from the model ended the run before the localiser
+#: had looked at the repository. Haiku returned a non-empty `missing` on all
+#: three of Engineer C's recorded runs (notes/2026-09-06-intake-clarify-gate.md),
+#: so in practice that was every run.
+CRITICAL_FACTS = frozenset({"observed_behaviour", "entrypoint_hint"})
 
 #: Somewhere to send StreamEvents as they happen. Called from the graph thread.
 EventSink = Callable[[StreamEvent], None]
@@ -99,8 +112,32 @@ def budget_exhausted(state: GraphState) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def missing_critical(facts: ReportFacts) -> set[str]:
+    """Critical fields the model reported missing AND did not in fact fill.
+
+    Both halves are load-bearing, and the second one is not paranoia. In the
+    committed recording the model listed `expected_behaviour` in `missing`
+    having just filled it with "no postage charge should apply"; on another run
+    it named `order_id`, `basket_total` and `postage_amount_charged`, none of
+    which are fields of ReportFacts at all. `missing` is the model's opinion
+    about its own output, so it is checked against the output, the same way
+    `reproduced` and `accepted` are checked against an ExecutionResult rather
+    than asked for. A field that is present is not missing, whoever says it is.
+    """
+    return {
+        name
+        for name in set(facts.missing) & CRITICAL_FACTS
+        if not getattr(facts, name, None)
+    }
+
+
 def route_after_intake(state: GraphState) -> str:
     """'clarify' when the facts are too thin to search on, else 'localise'.
+
+    Going to clarify ENDS THE RUN -- the client is asked a question and a human
+    resumes it later -- so the bar is "the localiser has nothing to work with",
+    not "the report could have been more complete". Nearly no real complaint
+    states everything.
 
     The clarify branch is bounded by MAX_CLARIFY_ROUNDS. A resumed run comes
     back with clarify_rounds already spent, and must not ask a second time.
@@ -116,7 +153,7 @@ def route_after_intake(state: GraphState) -> str:
         return "clarify"
     if facts.confidence < CLARIFY_CONFIDENCE_FLOOR:
         return "clarify"
-    if facts.missing:
+    if missing_critical(facts):
         return "clarify"
     return "localise"
 

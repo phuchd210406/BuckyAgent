@@ -6,6 +6,8 @@ Each router is pinned at its cap and one step either side of it.
 """
 from __future__ import annotations
 
+import pytest
+
 from repro.contracts import (
     MAX_CLARIFY_ROUNDS,
     MAX_FIX_ATTEMPTS,
@@ -21,6 +23,8 @@ from repro.contracts import (
 )
 from repro.graph.build import (
     CLARIFY_CONFIDENCE_FLOOR,
+    CRITICAL_FACTS,
+    missing_critical,
     route_after_fix,
     route_after_intake,
     route_after_repro,
@@ -30,12 +34,17 @@ GREEN = ExecutionResult(exit_code=0, stdout_tail="", stderr_tail="", duration_s=
 RED = ExecutionResult(exit_code=1, stdout_tail="1 failed", stderr_tail="", duration_s=0.1, failed=1)
 
 
-def facts(confidence: float = 1.0, missing: list[str] | None = None) -> ReportFacts:
+def facts(confidence: float = 1.0, missing: list[str] | None = None, **absent) -> ReportFacts:
+    """Complete, confident facts. Pass `observed_behaviour=None` to take one away."""
     return ReportFacts(
-        observed_behaviour="checkout charged twice",
-        entrypoint_hint="checkout",
-        confidence=confidence,
-        missing=missing or [],
+        **{
+            "observed_behaviour": "checkout charged twice",
+            "expected_behaviour": "charged once",
+            "entrypoint_hint": "checkout",
+            "confidence": confidence,
+            "missing": missing or [],
+            **absent,
+        }
     )
 
 
@@ -61,21 +70,36 @@ def fix_attempt(accepted: bool, attempt_no: int = 1) -> FixAttempt:
 
 
 # --- intake -> clarify | localise -------------------------------------------
-# The cap here is MAX_CLARIFY_ROUNDS: one round of questions, ever.
+#
+# Going to clarify ENDS the run: the client is asked a question and a human
+# resumes it later. So the bar is "the localiser has nothing to work with", not
+# "the report could have been more complete" -- see CRITICAL_FACTS. The cap on
+# top of that is MAX_CLARIFY_ROUNDS: one round of questions, ever.
+
+UNSEARCHABLE = {"observed_behaviour": None, "entrypoint_hint": None}
 
 
 def test_intake_asks_below_the_clarify_cap():
-    state = {"facts": facts(missing=["steps"]), "clarify_rounds": MAX_CLARIFY_ROUNDS - 1}
+    state = {
+        "facts": facts(missing=["observed_behaviour"], **UNSEARCHABLE),
+        "clarify_rounds": MAX_CLARIFY_ROUNDS - 1,
+    }
     assert route_after_intake(state) == "clarify"
 
 
 def test_intake_stops_asking_at_the_clarify_cap():
-    state = {"facts": facts(missing=["steps"]), "clarify_rounds": MAX_CLARIFY_ROUNDS}
+    state = {
+        "facts": facts(missing=["observed_behaviour"], **UNSEARCHABLE),
+        "clarify_rounds": MAX_CLARIFY_ROUNDS,
+    }
     assert route_after_intake(state) == "localise"
 
 
 def test_intake_stops_asking_past_the_clarify_cap():
-    state = {"facts": facts(missing=["steps"]), "clarify_rounds": MAX_CLARIFY_ROUNDS + 1}
+    state = {
+        "facts": facts(missing=["observed_behaviour"], **UNSEARCHABLE),
+        "clarify_rounds": MAX_CLARIFY_ROUNDS + 1,
+    }
     assert route_after_intake(state) == "localise"
 
 
@@ -92,6 +116,76 @@ def test_intake_asks_when_confidence_is_below_the_floor():
 
 def test_intake_asks_when_there_are_no_facts_at_all():
     assert route_after_intake({}) == "clarify"
+
+
+# --- which missing fields actually stop a run -------------------------------
+
+
+@pytest.mark.parametrize("field", sorted(CRITICAL_FACTS))
+def test_a_critical_field_that_is_really_absent_stops_the_run(field):
+    thin = facts(missing=[field], **{field: None})
+    assert route_after_intake({"facts": thin, "clarify_rounds": 0}) == "clarify"
+    assert missing_critical(thin) == {field}
+
+
+@pytest.mark.parametrize("field", ["environment", "steps", "expected_behaviour"])
+def test_a_non_critical_missing_field_does_not_stop_the_run(field):
+    """The reporter not spelling something out is not a reason to end the run.
+
+    Most client complaints never state what they expected instead; they say
+    what went wrong. The localiser can search from that.
+    """
+    incomplete = facts(missing=[field], **{field: None} if field != "steps" else {})
+    assert route_after_intake({"facts": incomplete, "clarify_rounds": 0}) == "localise"
+    assert missing_critical(incomplete) == set()
+
+
+def test_a_field_name_that_is_not_in_reportfacts_is_ignored():
+    """One recorded run in three named fields that do not exist in the schema.
+
+    A router that trusted the list verbatim would end the run over a field it
+    could not have filled in the first place.
+    """
+    invented = facts(missing=["order_id", "basket_total", "postage_amount_charged"])
+    assert route_after_intake({"facts": invented, "clarify_rounds": 0}) == "localise"
+    assert missing_critical(invented) == set()
+
+
+def test_a_critical_field_the_model_filled_is_not_missing_however_it_is_labelled():
+    """`missing` is the model's opinion about its own output, so it is checked.
+
+    In the committed recording the model put "expected_behaviour" in `missing`
+    having just filled it. The same slip on a critical field must not end a run
+    whose facts are right there.
+    """
+    contradictory = facts(missing=["observed_behaviour", "entrypoint_hint"])
+
+    assert contradictory.observed_behaviour and contradictory.entrypoint_hint
+    assert missing_critical(contradictory) == set()
+    assert route_after_intake({"facts": contradictory, "clarify_rounds": 0}) == "localise"
+
+
+def test_the_recorded_shopcart_facts_reach_the_localiser():
+    """The regression, in the model's own words.
+
+    Exactly what Haiku 4.5 returned for the flagship demo case
+    (src/repro/llm/cassettes/2d8376a00755e01d.json). Before CRITICAL_FACTS this
+    ended the run at the first node, every time.
+    """
+    recorded = ReportFacts(
+        observed_behaviour=(
+            "charged postage fee despite basket total exceeding $50 and site "
+            "stating free postage over $50"
+        ),
+        expected_behaviour="no postage charge should apply",
+        steps=["attempted to purchase items", "basket total was over $50"],
+        entrypoint_hint="checkout",
+        environment=None,
+        missing=["expected_behaviour"],
+        confidence=0.72,
+    )
+
+    assert route_after_intake({"facts": recorded, "clarify_rounds": 0}) == "localise"
 
 
 # --- repro -> fix | repro | report ------------------------------------------
