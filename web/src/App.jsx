@@ -1,13 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react'
-import RunForm, { SHOPCART_COMPLAINT } from './RunForm.jsx'
+import RunForm from './RunForm.jsx'
 import Timeline from './Timeline.jsx'
 import CostCounter from './CostCounter.jsx'
+import ModelBadge from './ModelBadge.jsx'
 import { buildCards, currentStep, latestUsage } from './timeline.js'
-import { followRun, startRun } from './api.js'
+import { fetchConfig, followRun, startRun } from './api.js'
 
 export default function App() {
-  const [rawText, setRawText] = useState(SHOPCART_COMPLAINT)
-  const [repoPath, setRepoPath] = useState('fixtures/demo_repos/shopcart')
+  const [rawText, setRawText] = useState('')
+  const [source, setSource] = useState('github') // github | demo
+  const [repoUrl, setRepoUrl] = useState('')
+  const [repoRef, setRepoRef] = useState('')
+  const [repoPath, setRepoPath] = useState('')
+  const [config, setConfig] = useState(null)
+  const [configError, setConfigError] = useState(null)
   const [status, setStatus] = useState('idle') // idle | running | done | error
   const [events, setEvents] = useState([])
   const [failure, setFailure] = useState(null) // {kind, message, runId}
@@ -16,6 +22,24 @@ export default function App() {
   const bottom = useRef(null)
 
   useEffect(() => () => closeStream.current?.(), [])
+
+  /* Ask the backend what it is before offering to run anything with it. The
+     demo repo list comes from here too, so the dropdown cannot offer a path
+     that does not exist on the machine that would have to open it. */
+  useEffect(() => {
+    let live = true
+    fetchConfig()
+      .then((loaded) => {
+        if (!live) return
+        setConfig(loaded)
+        const first = loaded.demo_repos?.[0]
+        if (first) setRepoPath((current) => current || first.path)
+      })
+      .catch((problem) => live && setConfigError(problem.message))
+    return () => {
+      live = false
+    }
+  }, [])
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -44,7 +68,12 @@ export default function App() {
     setRunId(null)
     setStatus('running')
     try {
-      const { run_id: id } = await startRun({ rawText, repoPath })
+      const { run_id: id } = await startRun({
+        rawText,
+        repoUrl: source === 'github' ? repoUrl : '',
+        repoRef: source === 'github' ? repoRef : '',
+        repoPath,
+      })
       setRunId(id)
       follow(id)
     } catch (startError) {
@@ -77,11 +106,19 @@ export default function App() {
     <main className="layout">
       <CostCounter usage={latestUsage(events)} status={status} />
       <aside className="col-left">
+        <ModelBadge config={config} error={configError} />
         <RunForm
           rawText={rawText}
           setRawText={setRawText}
+          source={source}
+          setSource={setSource}
+          repoUrl={repoUrl}
+          setRepoUrl={setRepoUrl}
+          repoRef={repoRef}
+          setRepoRef={setRepoRef}
           repoPath={repoPath}
           setRepoPath={setRepoPath}
+          demoRepos={config?.demo_repos || []}
           onRun={run}
           onReset={reset}
           status={status}

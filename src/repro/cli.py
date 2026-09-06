@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import uuid
 from pathlib import Path
@@ -28,22 +27,14 @@ DEFAULT_REPO = "fixtures/demo_repos/shopcart"
 
 
 def load_env() -> None:
-    """Make .env effective for `bedrock`, harmless for `fake`.
+    """Make .env effective for a real provider, harmless for `fake`.
 
-    override=False so an exported key beats the file: DEPLOY.md's 12-hour
-    routine is to re-export fresh keys, and those must win over a stale file.
+    One implementation, in settings, because the API needs exactly the same
+    thing and two copies would drift the day one of them learned a new key.
     """
-    env_path = REPO_ROOT / ".env"
-    if not env_path.is_file():
-        return
-    try:
-        from dotenv import load_dotenv
-    except ImportError:
-        return
-    load_dotenv(env_path, override=False)
-    for key, value in list(os.environ.items()):
-        if key.startswith("AWS_") and not value.strip():
-            del os.environ[key]
+    from repro.settings import load_env as _load
+
+    _load(REPO_ROOT / ".env")
 
 
 def read_report_text(args: argparse.Namespace) -> str:
@@ -110,9 +101,17 @@ def summarise(record, verbose: bool) -> None:
 def cmd_run(args: argparse.Namespace) -> int:
     load_env()
 
-    from repro.clients import llm_for
+    from repro.clients import llm_for, resolve_provider
     from repro.contracts import ClientReport
     from repro.graph.build import run
+
+    repo_path = args.repo
+    if args.repo_url:
+        from repro.sandbox.github import fetch_repo, parse_repo_ref
+
+        ref = parse_repo_ref(args.repo_url)
+        print(f"fetching   {ref} …", flush=True)
+        repo_path = str(fetch_repo(ref))
 
     report = ClientReport(
         run_id=args.run_id or uuid.uuid4().hex[:12],
@@ -120,10 +119,18 @@ def cmd_run(args: argparse.Namespace) -> int:
         # Left as given, usually relative. Workspace resolves it against the cwd,
         # and a relative path keeps this machine's checkout directory out of the
         # prompts -- and so out of the cassette keys.
-        repo_path=args.repo,
+        repo_path=repo_path,
     )
-    provider = args.provider or os.getenv("LLM_PROVIDER", "fake")
+    provider = resolve_provider(args.provider)
     print(f"provider   {provider}    repo {report.repo_path}")
+    if provider == "fake":
+        # Cassettes only answer prompts somebody recorded. Against a repository
+        # or a complaint they have never seen, every node misses -- which looks
+        # like a stupid model rather than like a missing key, so say it first.
+        print(
+            "           replaying recorded answers: no model is called. Set "
+            "ANTHROPIC_API_KEY for a real run."
+        )
 
     record = run(report, llm_for(provider))
 
@@ -141,11 +148,16 @@ def build_parser() -> argparse.ArgumentParser:
     runner = subcommands.add_parser("run", help="Investigate one client report.")
     runner.add_argument("--repo", default=DEFAULT_REPO,
                         help=f"Path to the project to investigate (default {DEFAULT_REPO}).")
+    runner.add_argument("--repo-url", default=None,
+                        help="A GitHub repository to clone and investigate instead of --repo: "
+                             "https://github.com/owner/repo, owner/repo, or a branch link.")
     runner.add_argument("--report", default=None, help="The complaint, verbatim.")
     runner.add_argument("--report-file", default=None, help="Read the complaint from a file.")
     runner.add_argument("--run-id", default=None, help="Defaults to a random id.")
-    runner.add_argument("--provider", default=None, choices=["fake", "bedrock"],
-                        help="Overrides LLM_PROVIDER.")
+    runner.add_argument("--provider", default=None,
+                        choices=["auto", "anthropic", "bedrock", "fake"],
+                        help="Overrides LLM_PROVIDER. 'auto' takes the first one with a "
+                             "credential; 'fake' replays cassettes and calls nothing.")
     runner.add_argument("--json", action="store_true", help="Print the RunRecord as JSON.")
     runner.add_argument("-v", "--verbose", action="store_true",
                         help="Also print the patch and the developer summary.")

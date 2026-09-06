@@ -29,6 +29,19 @@ export function buildCards(events) {
       case 'node_started': {
         const attempt = payload.attempt_no
         const of = payload.of || 3
+        // Cloning a real repository and installing its dependencies happens
+        // before the graph starts and is the slowest part of a first run. It is
+        // ONE card whose line changes as it goes -- fetching, then copying, then
+        // installing -- rather than a card per step, because a person watching
+        // wants to know it is still moving, not to read a log.
+        if (payload.node === 'prepare') {
+          const existing = open.prepare
+          if (existing) existing.step = payload.step || existing.step
+          else openCard('prepare', 'prepare', payload.step || 'Preparing the repository')
+        } else if (open.prepare) {
+          // The graph has started, so the sandbox is ready by definition.
+          finish('prepare', {})
+        }
         if (payload.node === 'intake') openCard('intake', 'intake', 'Reading the complaint')
         if (payload.node === 'localise') {
           openCard('localise', 'localise', 'Searching the code', { hypotheses: [] })
@@ -56,6 +69,11 @@ export function buildCards(events) {
         break
       }
       case 'node_finished': {
+        // Not `finish`: preparing is several steps and the card closes when the
+        // graph moves on, so this only folds in what the step learned.
+        if (payload.node === 'prepare' && open.prepare) {
+          open.prepare.data = { ...open.prepare.data, ...payload }
+        }
         if (payload.node === 'intake') finish('intake', { facts: payload.facts })
         if (payload.node === 'localise') finish('localise', {})
         if (payload.node === 'report') finish('report', {})
@@ -83,6 +101,10 @@ export function buildCards(events) {
         break
       }
       case 'error':
+        // A run that died while cloning leaves the prepare card spinning
+        // forever otherwise, which reads as a hang rather than as the failure
+        // the very next card explains.
+        if (open.prepare) finish('prepare', {})
         cards.push({ key: `error-${cards.length}`, kind: 'error', state: 'done', data: payload })
         break
       default:
@@ -96,6 +118,7 @@ export function buildCards(events) {
    gaps are short but they are not nothing, and naming them wrongly ("starting
    the run") is worse than a spinner. */
 const BETWEEN_STEPS = {
+  prepare: () => 'Reading the complaint',
   intake: () => 'Deciding whether the report is clear enough to search on',
   localise: () => 'Picking a hypothesis to test first',
   repro: (card) =>

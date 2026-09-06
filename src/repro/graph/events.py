@@ -25,6 +25,10 @@ from repro.contracts import (
 
 #: Human labels for the node names the graph uses.
 NODE_LABELS = {
+    # Not a graph node: the work of getting a real repository onto this machine
+    # and importable, which happens before START. It is on the timeline because
+    # it is the slowest thing in a real run and silence there reads as a hang.
+    "prepare": "Preparing the repository",
     "intake": "Reading the complaint",
     "clarify": "Writing a question for the client",
     "localise": "Searching the code",
@@ -65,6 +69,26 @@ def node_started(run_id: str, node: str, attempt_no: int | None = None, of: int 
         run_id=run_id,
         label=NODE_LABELS.get(node, node),
         payload=payload,
+    )
+
+
+def prepare_started(run_id: str, what: str) -> StreamEvent:
+    """Something slow and pre-graph is starting: a clone, or a dependency install."""
+    return StreamEvent(
+        type="node_started",
+        run_id=run_id,
+        label=what,
+        payload={"node": "prepare", "step": what},
+    )
+
+
+def prepare_finished(run_id: str, label: str, **detail) -> StreamEvent:
+    """The repository is on disk and its tests can be imported (or we say why not)."""
+    return StreamEvent(
+        type="node_finished",
+        run_id=run_id,
+        label=label,
+        payload={"node": "prepare", **detail},
     )
 
 

@@ -445,3 +445,41 @@ def test_a_workspaces_own_listing_wins_over_a_disk_walk(monkeypatch):
     monkeypatch.setitem(sys.modules, "repro.sandbox.repo_facts", module)
 
     assert list_source_files(fake_shopcart()) == ["shopcart/__init__.py", "shopcart/pricing.py"]
+
+
+# ---------------------------------------------------------------------------
+# Big repositories
+#
+# The index reads and parses every file it keeps, so it has to keep fewer than a
+# large repository has. WHICH ones it keeps is the part that matters: truncating
+# alphabetically excludes the file holding the bug before a word is scored, and
+# the symptom is indistinguishable from a model that cannot localise.
+# ---------------------------------------------------------------------------
+
+
+def test_the_index_cap_keeps_the_paths_the_complaint_points_at():
+    from repro.retrieval.index import _prioritise, expand_query
+
+    paths = [f"aaa/module_{n:04d}.py" for n in range(50)] + ["store/checkout/pricing.py"]
+    terms = expand_query("checkout charged me postage")
+
+    kept = _prioritise(paths, terms, limit=10)
+
+    assert "store/checkout/pricing.py" in kept
+    assert len(kept) == 10
+
+
+def test_a_repository_smaller_than_the_cap_is_left_exactly_as_it_was():
+    from repro.retrieval.index import _prioritise, expand_query
+
+    paths = ["b.py", "a.py", "checkout.py"]
+    assert _prioritise(paths, expand_query("checkout"), limit=10) == paths
+
+
+def test_prioritising_is_deterministic_because_a_prompt_is_a_cassette_key():
+    from repro.retrieval.index import _prioritise, expand_query
+
+    paths = [f"pkg/mod_{n}.py" for n in range(40)]
+    terms = expand_query("nothing matches any of these")
+
+    assert _prioritise(paths, terms, 5) == _prioritise(list(reversed(paths)), terms, 5)

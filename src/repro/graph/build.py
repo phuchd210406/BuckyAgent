@@ -47,6 +47,8 @@ from repro.graph import events
 from repro.graph.sandbox_seam import Sandbox, StubSandbox, WorkspaceSandbox
 from repro.graph.state import GraphState
 from repro.llm.base import LLMClient
+from repro.sandbox.deps import Environment
+from repro.sandbox.deps import prepare as prepare_environment
 from repro.sandbox.workspace import Workspace
 from repro.settings import Settings
 
@@ -410,6 +412,29 @@ def open_workspace(report: ClientReport, settings: Settings | None = None) -> Wo
     return Workspace(report.repo_path, root=Path(settings.workspace_root) / report.run_id)
 
 
+def prepare_workspace_environment(
+    workspace: Workspace, run_id: str, emit: EventSink
+) -> Environment:
+    """Make the workspace copy importable, and say on the stream what it took.
+
+    Only reached for a real run (the caller owns the workspace), and it installs
+    against the WORKSPACE, never the original: an editable install of the copy is
+    what makes a patch applied to that copy the code the tests import. Install
+    into the source instead and `fix` would verify a patch nobody ran.
+    """
+    env = prepare_environment(Path(workspace.path), Path(workspace.path).parent / "venv")
+    if env.installed or env.notes:
+        emit(
+            events.prepare_finished(
+                run_id,
+                "Dependencies installed" if env.installed else "Ready",
+                installed=env.installed,
+                detail=env.summary,
+            )
+        )
+    return env
+
+
 def run(
     report: ClientReport,
     llm: LLMClient,
@@ -436,17 +461,23 @@ def run(
     emit = _sink(on_event)
     emit(events.run_started(report))
     workspace: Workspace | None = None
+    environment: Environment | None = None
     try:
         if sandbox is None:
+            emit(events.prepare_started(report.run_id, "Copying the repository into a sandbox"))
             workspace = open_workspace(report)
-            sandbox = WorkspaceSandbox(workspace)
+            environment = prepare_workspace_environment(workspace, report.run_id, emit)
+            sandbox = WorkspaceSandbox(workspace, python_exe=environment.python)
         initial: GraphState = {"report": report}
         if workspace is not None:
             initial["workspace_path"] = str(workspace.path)
         final_state = build_graph(llm, sandbox=sandbox, on_event=emit).invoke(initial)
     finally:
         # Even when the graph raised. A leaked workspace is a leaked copy of a
-        # client's repository sitting in /tmp.
+        # client's repository sitting in /tmp, and a leaked virtualenv is a few
+        # hundred megabytes of the same accident.
+        if environment is not None:
+            environment.close()
         if workspace is not None:
             workspace.close()
 

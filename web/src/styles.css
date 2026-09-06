@@ -80,6 +80,73 @@ body {
 .complaint:focus, .repo:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
 .complaint:disabled, .repo:disabled { background: #fafbfc; color: var(--ink-2); }
 
+/* --- what the backend actually is ----------------------------------------- */
+
+.modelbar {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--green);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.modelbar strong { color: var(--ink); }
+.modelbar code {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--accent-soft);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.modelbar-warn { border-left-color: #b7791f; background: #fdfaf3; }
+.modeldot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  flex: none;
+  align-self: center;
+}
+
+/* --- repository source ---------------------------------------------------- */
+
+.segmented { display: flex; gap: 6px; margin-bottom: 8px; }
+.seg {
+  flex: 1;
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.seg-on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+.seg:disabled { color: #aab4c4; cursor: default; }
+.repo-ref { margin-top: 8px; }
+
+.linkish {
+  font: inherit;
+  font-size: inherit;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 .run {
   width: 100%;
   font: inherit;

@@ -20,20 +20,54 @@ red→green plus a green suite. It is enforced in
 [`RunRecord.check_invariants`](src/repro/contracts.py) and proved by
 [`tests/test_contracts.py`](tests/test_contracts.py).
 
-## Quickstart (no AWS account needed)
+## Quickstart
 
 ```bash
 git clone <your-repo-url> && cd repro
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env          # LLM_PROVIDER=fake by default
+cp .env.example .env
 make test                     # contract + invariant tests
 make demo                     # a full agent run, replayed from cassettes, $0.00
 ```
 
-`LLM_PROVIDER=fake` replays recorded model responses, so the whole pipeline runs
-deterministically, offline, for free. Set `LLM_PROVIDER=bedrock` with credentials
-to run live.
+### Running it on a real repository, for real
+
+`make demo` calls no model: it replays recorded answers, which only exist for
+the seeded repo and its recorded complaint. To point it at an actual project you
+need a model, and either credential works:
+
+```bash
+# Claude Haiku 4.5 on the Anthropic API — the key does not expire
+echo 'ANTHROPIC_API_KEY=sk-ant-...' >> .env
+
+# or the same model through Bedrock — sandbox keys last 12h
+#   LLM_PROVIDER=bedrock, plus AWS_* in .env; `make check-bedrock` proves it works
+```
+
+Then, from the command line:
+
+```bash
+make run REPO=owner/name REPORT="the checkout charged me postage even though it says free over \$50"
+```
+
+or in the browser:
+
+```bash
+make api      # backend on :8000
+make web      # UI on :5173 — paste any GitHub URL and the complaint
+```
+
+What happens on a real run, in order: the repository is cloned shallow into
+`~/.cache/repro/repos`, copied into a throwaway sandbox, its declared
+dependencies are installed into a per-run virtualenv (without which every
+generated test would fail at import), and only then does the agent read the
+complaint, search the code, write a failing test, and try to fix it. The page
+names the model that is answering and the run's hard spending cap, and says so
+plainly when there is no credential and it is about to replay instead.
+
+Private repositories need `GITHUB_TOKEN` set on the backend. The token is used
+for the clone and then wiped from the checkout's git config.
 
 ## Layout
 
@@ -42,8 +76,13 @@ to run live.
 | `src/repro/contracts.py` | **Frozen** typed contracts + loop bounds + the invariant checker |
 | `src/repro/settings.py` | Model ids, prices, region. Ids are constants, never built |
 | `src/repro/llm/base.py` | The `LLMClient` protocol — the only seam to any provider |
-| `src/repro/llm/bedrock.py` | Bedrock `converse` client, structured output, retries |
+| `src/repro/llm/structured.py` | Ask for an object, refuse a truncated reply, one repair round |
+| `src/repro/llm/bedrock.py` | Bedrock `converse` client, retries, throttle backoff |
+| `src/repro/llm/anthropic_api.py` | The same models on the first-party API. No expiring lease |
 | `src/repro/llm/fake.py` | Record/replay + scripted clients. Free, deterministic tests |
+| `src/repro/clients.py` | Which provider a run uses, and whether one is available at all |
+| `src/repro/sandbox/github.py` | Clone a real repository: bounded, cached, token-aware |
+| `src/repro/sandbox/deps.py` | A per-run virtualenv, so a real project's tests can import |
 | `src/repro/sandbox/` | Disposable workspace, pytest runner, patch apply/revert |
 | `src/repro/retrieval/` | Local code search. No vector DB, by design |
 | `src/repro/agents/` | The five nodes and their system prompts |
@@ -64,6 +103,12 @@ to run live.
 
 ## Limitations
 
-Python + pytest only. One repo per run. No dependency installation in the
-sandbox. No auto-merge, ever — the output is a patch and a pull request body
-that a human approves.
+Python + pytest only. One repo per run. No auto-merge, ever — the output is a
+patch and a pull request body that a human approves.
+
+On a real repository, two things bound what it can do. Dependencies are
+installed from what the project declares (`requirements*.txt`, `pyproject.toml`,
+`setup.py`); a project that needs a database, a compiler toolchain or a service
+running will have tests that error, and an error is never counted as a
+reproduction. And a very large repository is refused rather than half-indexed —
+`REPRO_MAX_REPO_MB`, default 500 MB.

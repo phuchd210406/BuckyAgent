@@ -50,12 +50,19 @@ def run_pytest(
     ws: Workspace,
     target: str | None = None,
     timeout_s: int = SANDBOX_TIMEOUT_S,
+    python_exe: str | None = None,
 ) -> ExecutionResult:
     """Run the suite (or one node id) and parse the summary line into counts.
 
     MUST NOT raise on test failure — a failing test is data, not an error.
     MUST return ``timed_out=True`` rather than hanging.
     MUST truncate stdout/stderr to the tail, never return full dumps.
+
+    ``python_exe`` is the interpreter to run pytest with. It defaults to the
+    one running the harness, which is right for a stdlib-only project; a real
+    repository off GitHub gets the virtualenv `sandbox.deps` built for it, and
+    without that its imports fail at collection. It is a path this process
+    chose, never a model-chosen one.
 
     ``target`` is a pytest node id relative to the workspace root, e.g.
     ``"tests/test_pricing.py"`` or ``"tests/test_pricing.py::test_total"``.
@@ -73,7 +80,7 @@ def run_pytest(
     args = _target_args(ws, target)
 
     cmd = [
-        sys.executable,
+        python_exe or sys.executable,
         "-m",
         "pytest",
         "-q",

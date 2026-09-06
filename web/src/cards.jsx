@@ -407,6 +407,35 @@ function ClientReplyCard({ card }) {
   )
 }
 
+/* --- prepare (clone + dependencies) --------------------------------------- */
+
+function PrepareCard({ card }) {
+  const { repo, repo_path: path, installed, detail } = card.data
+  return (
+    <Card
+      card={card}
+      eyebrow="Step 0 · Sandbox"
+      title={repo ? `Fetched ${repo}` : 'Repository ready'}
+      right={
+        card.state === 'done' && (
+          <Badge tone={installed ? 'green' : 'neutral'} icon={installed ? '✓' : '◑'}>
+            {installed ? 'dependencies installed' : 'no install needed'}
+          </Badge>
+        )
+      }
+    >
+      <div className="fields">
+        {path && <Field label="Sandbox copy"><span className="path">{path}</span></Field>}
+        {detail && <Field label="Environment">{detail}</Field>}
+      </div>
+      <p className="note">
+        The agent works on a throwaway copy. The repository it came from is never
+        written to.
+      </p>
+    </Card>
+  )
+}
+
 function ReportCard({ card }) {
   return <Card card={card} eyebrow="Step 5 · Handover" title="Writing the handover" />
 }
@@ -421,6 +450,7 @@ function ErrorCard({ card }) {
 }
 
 const BY_KIND = {
+  prepare: PrepareCard,
   intake: IntakeCard,
   localise: LocaliseCard,
   repro: ReproCard,

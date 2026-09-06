@@ -25,6 +25,19 @@ def _no_inherited_keep_flag(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _never_call_a_real_model(monkeypatch):
+    """Pin LLM_PROVIDER=fake unless a test says otherwise.
+
+    `clients.resolve_provider` defaults to `auto`, which picks the first
+    provider that has a credential -- correct for a person running the app, and
+    a way to spend money by running the test suite on a machine that happens to
+    have ANTHROPIC_API_KEY exported. The suite asserts behaviour, never model
+    quality, so it never needs a real one.
+    """
+    monkeypatch.setenv("LLM_PROVIDER", "fake")
+
+
+@pytest.fixture(autouse=True)
 def _fresh_session_budget(monkeypatch):
     """Give every test its own session budget.
 

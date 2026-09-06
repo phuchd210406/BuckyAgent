@@ -62,15 +62,21 @@ This is where 90% of the work happens, and almost all of it needs no AWS at all.
 git clone https://github.com/<your-org>/repro.git && cd repro
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env          # leave LLM_PROVIDER=fake
+cp .env.example .env          # LLM_PROVIDER=auto, and no keys yet -> fake
 
 make test                     # contract + invariant tests
 make demo                     # full agent run, replayed, $0.00
 make api                      # http://localhost:8000
 ```
 
-`LLM_PROVIDER=fake` is the default on purpose. Only Engineer C, and only while
-recording cassettes, should ever have `bedrock` in their `.env`.
+`LLM_PROVIDER=auto` resolves to `fake` until a credential exists, so a fresh
+clone spends nothing by accident. It resolves to `anthropic` the moment an
+`ANTHROPIC_API_KEY` is in `.env`, and to `bedrock` when only the AWS keys are —
+which is the deployed configuration. Which one a run would actually use is
+`GET /config`, and the web UI shows it, so nobody has to guess whether the run
+on screen called a model.
+
+Only Engineer C, and only while recording cassettes, should have `REPRO_RECORD=1`.
 
 ### Recording cassettes (hour ~20, costs ~$0.50 total)
 

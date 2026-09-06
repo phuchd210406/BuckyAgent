@@ -21,7 +21,11 @@ MOCK=1 REPRO_MOCK_SPEED=0.1 make api   # ...and ten times faster
 ```
 
 Both paths emit through `repro.graph.events`, so the browser cannot tell them
-apart. `GET /healthz` reports which one is running.
+apart from the stream alone — which is why `GET /config` reports which one is
+running and the page shows it as a banner. A mock run replays ONE recording, of
+the seeded shopcart repo, so it ignores whatever repository the form asked for
+and names shopcart instead; a header saying `pallets/flask` above hypotheses in
+`shopcart/pricing.py` reads as broken rather than as replayed.
 
 Open http://localhost:5173 and press **Run**. Vite proxies `/runs` and
 `/healthz` to :8000, so the browser stays on one origin and the API needs no

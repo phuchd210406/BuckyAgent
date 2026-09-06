@@ -10,15 +10,53 @@ const EVENT_TYPES = [
   'hypothesis', 'repro_attempt', 'fix_attempt', 'verdict', 'error',
 ]
 
-export async function startRun({ rawText, repoPath }) {
+/**
+ * Start a run against either a GitHub repository or a local demo checkout.
+ *
+ * Exactly one of `repoUrl` and `repoPath` is sent: the API refuses both, and a
+ * missing one is the difference between "clone this" and "use what is on disk".
+ */
+export async function startRun({ rawText, repoUrl, repoPath, repoRef }) {
+  const body = { raw_text: rawText }
+  if (repoUrl?.trim()) {
+    body.repo_url = repoUrl.trim()
+    if (repoRef?.trim()) body.repo_ref = repoRef.trim()
+  } else {
+    body.repo_path = repoPath
+  }
+
   const response = await fetch(`${API_BASE}/runs`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ raw_text: rawText, repo_path: repoPath }),
+    body: JSON.stringify(body),
   })
   if (!response.ok) {
-    throw new Error(`the backend refused the run (${response.status}): ${await response.text()}`)
+    throw new Error(`the backend refused the run (${response.status}): ${await detail(response)}`)
   }
+  return response.json()
+}
+
+/** FastAPI puts the readable half of a 4xx in `detail`; fall back to the body. */
+async function detail(response) {
+  const text = await response.text()
+  try {
+    const parsed = JSON.parse(text)
+    if (typeof parsed.detail === 'string') return parsed.detail
+    if (Array.isArray(parsed.detail)) return parsed.detail.map((d) => d.msg).join('; ')
+  } catch {
+    /* not JSON; the raw body is the best we have */
+  }
+  return text
+}
+
+/**
+ * What the backend would really do right now: which provider, which model, and
+ * whether a model is called at all. Fetched once on load so the page can say so
+ * rather than implying a live run it is not going to make.
+ */
+export async function fetchConfig() {
+  const response = await fetch(`${API_BASE}/config`)
+  if (!response.ok) throw new Error(`GET /config failed: ${response.status}`)
   return response.json()
 }
 

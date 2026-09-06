@@ -1,4 +1,4 @@
-.PHONY: install test test-fast lint lint-fix check-bedrock demo eval record api serve
+.PHONY: install test test-fast lint lint-fix check-bedrock demo run eval record api serve web
 
 # --- how these recipes find Python -----------------------------------------
 # Recipes run under /bin/sh with whatever PATH you happen to have. Two traps
@@ -40,14 +40,25 @@ demo:                     ## Full run on a seeded bug, replayed, zero cost
 	LLM_PROVIDER=fake $(PY) -m repro.cli run --repo fixtures/demo_repos/shopcart \
 		--report "$$($(PY) scripts/demo_report.py)"
 
+run:                      ## A REAL run on a real repo. COSTS MONEY (a few cents).
+                          ## make run REPO=owner/name REPORT="what the client wrote"
+ifndef REPO
+	@echo 'usage: make run REPO=owner/name REPORT="the checkout charged me postage"'
+	@exit 1
+endif
+	$(PY) -m repro.cli run --repo-url "$(REPO)" --report "$(REPORT)" -v
+
 record:                   ## Re-record cassettes against real Bedrock (COSTS MONEY)
 	REPRO_RECORD=1 LLM_PROVIDER=bedrock $(PY) scripts/record_cassettes.py
 
 eval:
 	LLM_PROVIDER=fake $(PY) eval/run_eval.py --dataset eval/dataset.yaml
 
-api:
+api:                      ## The backend the web UI talks to, on :8000
 	$(PY) -m uvicorn repro.api.main:app --reload --port 8000
+
+web:                      ## The web UI on :5173, proxying /runs to the API
+	cd web && npm install && npm run dev
 
 serve:                    ## AgentCore contract, locally, free
 	$(PY) src/repro/agentcore/agent.py

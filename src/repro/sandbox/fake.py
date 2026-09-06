@@ -261,7 +261,11 @@ class ScriptedRunner:
         ws: Workspace,
         target: str | None = None,
         timeout_s: int = SANDBOX_TIMEOUT_S,
+        python_exe: str | None = None,
     ) -> ExecutionResult:
+        # `python_exe` is accepted and ignored: nothing is executed here, and the
+        # parity test in tests/test_fake_parity.py fails the build if this
+        # signature ever drifts from run_pytest's.
         self.calls.append((target, timeout_s))
         if self.results:
             return self.results.pop(0)

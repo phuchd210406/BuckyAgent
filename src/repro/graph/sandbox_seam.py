@@ -12,6 +12,7 @@ do it.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Protocol
 
@@ -33,6 +34,24 @@ Hit = tuple[str, str, float]
 
 #: The agent may write here and nowhere else (ARCHITECTURE.md, "Allow-list").
 TEST_DIR = "tests/"
+
+
+def sandbox_timeout_s() -> int:
+    """How long one pytest invocation may take. Read at call time, never cached.
+
+    `SANDBOX_TIMEOUT_S` (60s) is right for the seeded fixture and far too short
+    for a real project's whole suite, which `fix` must run green before any patch
+    is accepted. A suite that times out is indistinguishable from a broken patch,
+    so this is raised for real repositories rather than left to bite.
+    """
+    raw = os.environ.get("REPRO_SANDBOX_TIMEOUT_S", "").strip()
+    if not raw:
+        return SANDBOX_TIMEOUT_S
+    try:
+        value = int(float(raw))
+    except ValueError:
+        return SANDBOX_TIMEOUT_S
+    return value if value > 0 else SANDBOX_TIMEOUT_S
 
 
 def unsafe_test_path(path: str) -> str | None:
@@ -87,9 +106,17 @@ class WorkspaceSandbox:
     why nothing else in the graph imports them.
     """
 
-    def __init__(self, ws: Workspace, timeout_s: int = SANDBOX_TIMEOUT_S) -> None:
+    def __init__(
+        self,
+        ws: Workspace,
+        timeout_s: int | None = None,
+        python_exe: str | None = None,
+    ) -> None:
         self.ws = ws
-        self.timeout_s = timeout_s
+        self.timeout_s = sandbox_timeout_s() if timeout_s is None else timeout_s
+        #: The interpreter pytest runs under: the virtualenv `sandbox.deps`
+        #: built for this repo, or None for the harness's own.
+        self.python_exe = python_exe
 
     def search(self, query: str, k: int = 8) -> list[Hit]:
         return _search(self.ws, query, k=k)
@@ -107,10 +134,14 @@ class WorkspaceSandbox:
         self.ws.write_file(test.path, test.source)
 
     def run_test(self, test_path: str) -> ExecutionResult:
-        return _run_pytest(self.ws, target=test_path, timeout_s=self.timeout_s)
+        return _run_pytest(
+            self.ws, target=test_path, timeout_s=self.timeout_s, python_exe=self.python_exe
+        )
 
     def run_suite(self) -> ExecutionResult:
-        return _run_pytest(self.ws, target=None, timeout_s=self.timeout_s)
+        return _run_pytest(
+            self.ws, target=None, timeout_s=self.timeout_s, python_exe=self.python_exe
+        )
 
     def apply_patch(self, patch: Patch) -> tuple[bool, str]:
         return _apply_patch(self.ws, patch)

@@ -6,6 +6,15 @@ stream. `MOCK=1` swaps the graph for a fixture replay at the same pacing and
 through the same event vocabulary: the rehearsal path when something upstream
 is broken, and the reason the UI can be worked on with no AWS and no repo.
 
+A run takes EITHER a `repo_url` -- any GitHub repository, which is cloned here
+before the graph starts -- or a `repo_path` under an allowed root, which is how
+the seeded demo repo is still reachable. The clone is the reason this API can be
+pointed at a client's actual project instead of a fixture.
+
+`GET /config` says which provider and model a run would really use, because a
+UI that shows "Claude Haiku" while the backend is replaying cassettes is lying
+to the person watching it.
+
 Nothing that leaves this module has skipped `check_invariants()`.
 """
 from __future__ import annotations
@@ -26,11 +35,26 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
-from repro.clients import llm_for
-from repro.contracts import ClientReport, RunRecord, StreamEvent
+from repro.clients import credential_for, llm_for, resolve_provider
+from repro.contracts import MAX_RUN_USD, ClientReport, RunRecord, StreamEvent
 from repro.graph import events
 from repro.graph.build import enforce_invariants
 from repro.graph.build import run as run_graph
+from repro.llm.base import SchemaValidationError
+from repro.sandbox import deps
+from repro.sandbox.github import (
+    DEFAULT_CACHE_ROOT,
+    RepoFetchError,
+    RepoRef,
+    fetch_repo,
+    parse_repo_ref,
+)
+from repro.settings import load_env, model_id_for, model_label
+
+# Before anything below reads the environment. `uvicorn repro.api.main:app` does
+# not run the CLI, so without this a key sitting in .env would never be seen and
+# every run would quietly replay cassettes instead of calling a model.
+load_env()
 
 LOG = logging.getLogger("repro.api")
 
@@ -71,14 +95,34 @@ FIXTURE_PATH = Path(
     )
 )
 
+#: Where the seeded demo repositories live. Offered by GET /config so the UI
+#: does not hard-code a path that only exists in this checkout.
+DEMO_REPO_ROOT = Path(__file__).resolve().parents[3] / "fixtures" / "demo_repos"
+
 #: Real runs copy this path and run pytest inside the copy. The endpoint is
 #: unauthenticated by design, so it will only do that for repos underneath an
 #: allowed root -- otherwise "repo_path" is an arbitrary read of this machine.
+#: A cloned repository is always allowed: WE chose that path, not the caller.
 #: Set REPRO_ALLOWED_REPOS="" to turn the check off.
-ALLOWED_REPO_ROOT = os.getenv(
-    "REPRO_ALLOWED_REPOS",
-    str(Path(__file__).resolve().parents[3] / "fixtures" / "demo_repos"),
-)
+ALLOWED_REPO_ROOT = os.getenv("REPRO_ALLOWED_REPOS", str(DEMO_REPO_ROOT))
+
+
+def allowed_roots() -> list[Path]:
+    """Directories a caller-supplied `repo_path` may sit under."""
+    roots = [Path(part.strip()) for part in ALLOWED_REPO_ROOT.split(",") if part.strip()]
+    return [root.expanduser().resolve() for root in [*roots, DEFAULT_CACHE_ROOT]]
+
+
+def demo_repos() -> list[dict]:
+    """Every seeded repo in the fixtures directory, newest listing on each call."""
+    if not DEMO_REPO_ROOT.is_dir():
+        return []
+    return [
+        {"path": str(path), "name": path.name}
+        for path in sorted(DEMO_REPO_ROOT.iterdir())
+        if path.is_dir()
+    ]
+
 
 #: run_id -> the run. In memory on purpose: runs are minutes long, not days,
 #: and the durable copy is the RunRecord JSON under runs/.
@@ -96,10 +140,25 @@ def mock_enabled() -> bool:
 
 
 class NewRun(BaseModel):
-    """What the web form posts. The rest of ClientReport we fill in."""
+    """What the web form posts. The rest of ClientReport we fill in.
+
+    One of `repo_url` and `repo_path`, never both and never neither. They are
+    two ways to name the same thing -- a project on this machine -- and the URL
+    is the one a person actually has to hand on a Monday morning.
+    """
 
     raw_text: str = Field(min_length=1, description="The complaint, verbatim.")
-    repo_path: str = Field(min_length=1, description="Path to a local checkout.")
+    repo_url: Optional[str] = Field(
+        None,
+        description="A GitHub repository: https://github.com/owner/repo, owner/repo, "
+        "or a link to a branch. Cloned before the run starts.",
+    )
+    repo_path: Optional[str] = Field(
+        None, description="Path to a local checkout, under an allowed root."
+    )
+    repo_ref: Optional[str] = Field(
+        None, description="Branch, tag or commit. Overrides any ref in repo_url."
+    )
     reporter_name: Optional[str] = None
 
 
@@ -113,6 +172,32 @@ class RunAccepted(BaseModel):
 
 #: Sentinel: the run is over, close the stream.
 _DONE = object()
+
+
+class NoModelCredentials(RuntimeError):
+    """The run needed a model and the environment only had recorded answers.
+
+    Raised in place of the cassette-miss error, which is written for whoever
+    records cassettes and reads, to everybody else, like the agent broke. The
+    cause is nearly always a missing key, and the fix is one line of .env.
+    """
+
+
+class ExpiredCredentials(RuntimeError):
+    """The provider had a credential and the provider rejected it."""
+
+
+#: Substrings that mean "your keys, not your code". The AWS sandbox lease lasts
+#: twelve hours, so this is the single most likely failure of a real run, and
+#: `ExpiredTokenException` in a stack trace does not tell anyone to re-paste it.
+_EXPIRED_MARKERS = (
+    "expiredtoken",
+    "security token included in the request is expired",
+    "unrecognizedclientexception",
+    "invalidclienttokenid",
+    "authentication_error",
+    "invalid x-api-key",
+)
 
 
 class RunStream:
@@ -169,6 +254,7 @@ class RunStream:
         self.error = f"{type(exc).__name__}: {exc}"
         self._emit(events.run_failed(self.run_id, exc))
 
+
     # --- reading ------------------------------------------------------------
     def subscribe(self) -> asyncio.Queue:
         """Queue pre-loaded with the backlog. No awaits: nothing can interleave."""
@@ -188,6 +274,12 @@ class RunStream:
 class RealRun(RunStream):
     """The actual graph, on a worker thread."""
 
+    def __init__(self, report: ClientReport, repo_ref: RepoRef | None = None) -> None:
+        super().__init__(report)
+        #: Set when the caller gave a GitHub URL: the repo is fetched here,
+        #: before the graph starts, and `report.repo_path` is filled in from it.
+        self.repo_ref = repo_ref
+
     async def play(self) -> None:
         loop = asyncio.get_running_loop()
 
@@ -197,11 +289,32 @@ class RealRun(RunStream):
             loop.call_soon_threadsafe(self._emit, event)
 
         try:
+            if self.repo_ref is not None:
+                # Minutes of network on a big repository, so it happens on a
+                # worker thread with the timeline showing what it is waiting on.
+                self._emit(events.prepare_started(self.run_id, f"Fetching {self.repo_ref}"))
+                path = await asyncio.to_thread(fetch_repo, self.repo_ref)
+                self.report.repo_path = str(path)
+                self._emit(
+                    events.prepare_finished(
+                        self.run_id,
+                        f"{self.repo_ref} cloned",
+                        repo=str(self.repo_ref),
+                        repo_path=str(path),
+                    )
+                )
+
             record = await asyncio.to_thread(
                 lambda: run_graph(self.report, llm_for(), on_event=emit_from_thread)
             )
-        except Exception as exc:  # noqa: BLE001 - one bad run must not kill the server
+        except RepoFetchError as exc:
+            # A repository we could not fetch is the caller's problem to fix, and
+            # it deserves the message git gave us rather than a traceback.
             self.fail(exc)
+        except SchemaValidationError as exc:
+            self.fail(_explain_schema_failure(exc))
+        except Exception as exc:  # noqa: BLE001 - one bad run must not kill the server
+            self.fail(_explain_credentials(exc))
         else:
             self.publish(record)
         finally:
@@ -258,9 +371,57 @@ class MockRun(RunStream):
         )
 
 
+def _explain_schema_failure(exc: SchemaValidationError) -> BaseException:
+    """Name the real cause when the model was never called in the first place."""
+    if resolve_provider() != "fake":
+        return exc
+    return NoModelCredentials(
+        "This run needed a model and there are no credentials, so it fell back to "
+        "replaying recorded answers -- which only exist for the seeded demo repo and "
+        "its recorded complaint. Set ANTHROPIC_API_KEY (or refresh the AWS keys and set "
+        "LLM_PROVIDER=bedrock) in .env and restart the API."
+    )
+
+
+def _explain_credentials(exc: BaseException) -> BaseException:
+    """Say "re-paste your keys" when that is what happened, and nothing otherwise."""
+    text = f"{type(exc).__name__}: {exc}".lower()
+    if not any(marker in text for marker in _EXPIRED_MARKERS):
+        return exc
+    provider = resolve_provider()
+    if provider == "bedrock":
+        return ExpiredCredentials(
+            "AWS rejected these credentials. Sandbox keys last 12 hours: re-paste all "
+            "three of AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_SESSION_TOKEN "
+            "into .env together, then restart the API. `make check-bedrock` proves "
+            "they work before you spend a run on them."
+        )
+    return ExpiredCredentials(
+        f"The {provider} credentials were rejected. Check ANTHROPIC_API_KEY in .env "
+        "and restart the API."
+    )
+
+
 @lru_cache(maxsize=1)
 def load_fixture(path: str | None = None) -> dict:
     return json.loads(Path(path or FIXTURE_PATH).read_text(encoding="utf-8"))
+
+
+def fixture_repo() -> str:
+    """The repository the recorded run is OF, for a mock run to name.
+
+    A mock run replays one recording, so whatever repository the caller asked
+    for is not the one on screen: the header said `pallets/flask` while every
+    hypothesis under it said `shopcart/pricing.py`. The badge does say it is a
+    rehearsal, but a screen that contradicts itself reads as broken rather than
+    as replayed. The fixture names its own repository so a future recording of
+    something else needs no change here.
+    """
+    try:
+        recorded = str(load_fixture().get("repo") or "").strip()
+    except (OSError, ValueError):  # a broken fixture is MockRun's to report
+        recorded = ""
+    return recorded or str(DEMO_REPO_ROOT / "shopcart")
 
 
 # ---------------------------------------------------------------------------
@@ -297,14 +458,17 @@ def check_repo_path(repo_path: str) -> None:
     """A real run copies this directory. Refuse anything outside the allow-list."""
     if not ALLOWED_REPO_ROOT:
         return  # deliberately disabled
-    root = Path(ALLOWED_REPO_ROOT).resolve()
+    roots = allowed_roots()
     candidate = Path(repo_path).expanduser().resolve()
-    if not candidate.is_relative_to(root):
+    if not any(candidate.is_relative_to(root) for root in roots):
         raise HTTPException(
             status_code=400,
             detail=(
-                f"repo_path must be inside {root}. This endpoint has no auth, so it "
-                f"will not copy an arbitrary directory off this machine."
+                "repo_path must be inside one of "
+                + ", ".join(str(root) for root in roots)
+                + ". This endpoint has no auth, so it will not copy an arbitrary "
+                "directory off this machine. To investigate a project that is not "
+                "there, pass repo_url and let the API clone it."
             ),
         )
     if not candidate.is_dir():
@@ -321,19 +485,82 @@ def healthz() -> dict:
     return {"ok": True, "mode": "mock" if mock_enabled() else "live"}
 
 
+@app.get("/config")
+def config() -> dict:
+    """What a run started right now would ACTUALLY do.
+
+    The UI reads this to name the model on screen. It is computed from the same
+    `resolve_provider` the run itself calls, so the badge cannot say "Haiku"
+    while the backend quietly replays a cassette -- which is the difference
+    between a demo and a lie.
+    """
+    provider = "mock" if mock_enabled() else resolve_provider()
+    model = model_id_for(provider)
+    return {
+        "mode": "mock" if mock_enabled() else "live",
+        "provider": provider,
+        "model_id": model,
+        "model": model_label(model) if model else "recorded replies (no model is called)",
+        # `fake` is not a real run: it can only answer prompts somebody recorded.
+        "live_model": provider in {"anthropic", "bedrock"},
+        "credentials": {name: credential_for(name) for name in ("anthropic", "bedrock")},
+        "github_token": bool(os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")),
+        "install_deps": deps.install_mode(),
+        "max_run_usd": MAX_RUN_USD,
+        "demo_repos": demo_repos(),
+    }
+
+
 @app.post("/runs", status_code=201, response_model=RunAccepted)
 async def create_run(body: NewRun) -> RunAccepted:
-    """Start a run and hand back its id. The work happens off this request."""
+    """Start a run and hand back its id. The work happens off this request.
+
+    The repository is only PARSED here, never fetched: a clone is minutes of
+    network and this response is what the browser needs before it can open the
+    stream. A typo still fails fast, with a 400 that names what is accepted.
+    """
+    repo_ref = None
+    repo_path = (body.repo_path or "").strip()
+
+    if body.repo_url and repo_path:
+        raise HTTPException(status_code=400, detail="pass repo_url or repo_path, not both")
+    if body.repo_url:
+        try:
+            repo_ref = parse_repo_ref(body.repo_url)
+        except RepoFetchError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if body.repo_ref:
+            # An explicitly given ref wins over one embedded in the URL: the
+            # person filled in a second box, which is a later decision.
+            repo_ref = RepoRef(
+                owner=repo_ref.owner, repo=repo_ref.repo, ref=body.repo_ref.strip()
+            )
+        # Filled in for real once the clone lands; the placeholder is what the
+        # timeline shows in the meantime, and it is the thing the user typed.
+        repo_path = str(repo_ref)
+    elif not repo_path:
+        raise HTTPException(
+            status_code=400,
+            detail="a run needs a repository: pass repo_url (a GitHub repo) or repo_path.",
+        )
+
+    if mock_enabled():
+        # Nothing is fetched or read on this path, and the recording is of one
+        # particular repository -- so that is the one the screen names.
+        repo_path = fixture_repo()
+
     report = ClientReport(
         run_id=uuid.uuid4().hex,
         raw_text=body.raw_text,
-        repo_path=body.repo_path,
+        repo_path=repo_path,
         reporter_name=body.reporter_name,
     )
     if mock_enabled():
         run: RunStream = MockRun(report)
+    elif repo_ref is not None:
+        run = RealRun(report, repo_ref=repo_ref)
     else:
-        check_repo_path(body.repo_path)  # only a real run touches the filesystem
+        check_repo_path(repo_path)  # only a real run touches the filesystem
         run = RealRun(report)
 
     RUNS[run.run_id] = run

@@ -497,3 +497,214 @@ def test_verification_failure_is_not_terminal_because_a_verdict_still_follows(
 
     failure = next(event for event in stream_events if event.type == "error")
     assert failure.payload["terminal"] is False
+
+
+# ---------------------------------------------------------------------------
+# Real repositories, and telling the truth about the model
+#
+# The app is only useful if it can be pointed at a client's actual project, so
+# these pin the contract the form is built against: a URL is parsed at POST time
+# (fast feedback for a typo) and fetched inside the run (minutes of network,
+# with the timeline showing what it is waiting on).
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def live(monkeypatch):
+    """Off the mock path, without letting a test touch the network or a model."""
+    monkeypatch.setenv("MOCK", "0")
+    main.RUNS.clear()
+
+
+def test_a_github_url_is_accepted_and_parsed_at_post_time(client, live):
+    response = client.post(
+        "/runs",
+        json={"raw_text": "checkout is broken", "repo_url": "https://github.com/psf/requests"},
+    )
+
+    assert response.status_code == 201
+    run = main.RUNS[response.json()["run_id"]]
+    assert (run.repo_ref.owner, run.repo_ref.repo) == ("psf", "requests")
+    # Nothing has been cloned yet: the timeline shows what was asked for.
+    assert run.report.repo_path == "psf/requests"
+
+
+def test_an_explicit_ref_beats_the_one_in_the_url(client, live):
+    run_id = client.post(
+        "/runs",
+        json={
+            "raw_text": "broken",
+            "repo_url": "https://github.com/pallets/flask/tree/3.0.x",
+            "repo_ref": "main",
+        },
+    ).json()["run_id"]
+
+    assert main.RUNS[run_id].repo_ref.ref == "main"
+
+
+def test_a_typo_in_the_url_fails_immediately_with_something_actionable(client, live):
+    response = client.post("/runs", json={"raw_text": "broken", "repo_url": "gitlab.com/a/b"})
+
+    assert response.status_code == 400
+    assert "github.com/owner/repo" in response.json()["detail"]
+
+
+def test_a_run_needs_a_repository_and_will_not_guess_one(client, live):
+    response = client.post("/runs", json={"raw_text": "broken"})
+
+    assert response.status_code == 400
+    assert "repo_url" in response.json()["detail"]
+
+
+def test_a_url_and_a_path_together_are_refused_rather_than_ranked(client, live):
+    response = client.post(
+        "/runs",
+        json={"raw_text": "broken", "repo_url": "psf/requests", "repo_path": "/tmp/x"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_a_failed_clone_ends_the_run_with_the_reason_git_gave(client, live, monkeypatch):
+    """Not a traceback: the person pasted something and needs to know what to fix."""
+    from repro.sandbox.github import RepoFetchError
+
+    def refuse(ref):
+        raise RepoFetchError("GitHub has no repository acme/nope, or it is not visible to us.")
+
+    monkeypatch.setattr(main, "fetch_repo", refuse)
+
+    run_id = client.post(
+        "/runs", json={"raw_text": "broken", "repo_url": "acme/nope"}
+    ).json()["run_id"]
+    events = read_events(client, run_id)
+
+    assert events[-1].type == "error"
+    assert events[-1].payload["terminal"] is True
+    assert "acme/nope" in events[-1].payload["error"]
+
+
+def test_the_cloned_repo_cache_is_always_an_allowed_root(monkeypatch, tmp_path):
+    """We chose that path, so a caller pointing at it is not pointing anywhere new."""
+    monkeypatch.setattr(main, "ALLOWED_REPO_ROOT", str(tmp_path / "demo_repos"))
+    monkeypatch.setattr(main, "DEFAULT_CACHE_ROOT", tmp_path / "clones")
+    cloned = tmp_path / "clones" / "psf__requests"
+    cloned.mkdir(parents=True)
+
+    main.check_repo_path(str(cloned))  # does not raise
+
+
+# --- GET /config --------------------------------------------------------------
+
+
+def test_config_names_the_model_that_would_actually_answer(client, live, monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+
+    config = client.get("/config").json()
+
+    assert config["provider"] == "anthropic"
+    assert config["live_model"] is True
+    assert "Haiku" in config["model"]
+    assert config["max_run_usd"] > 0
+
+
+def test_config_admits_when_no_model_will_be_called(client, live, monkeypatch):
+    """A page that showed a model name here would be lying about a replayed run."""
+    monkeypatch.setenv("LLM_PROVIDER", "fake")
+
+    config = client.get("/config").json()
+
+    assert config["provider"] == "fake"
+    assert config["live_model"] is False
+    assert config["model_id"] == ""
+
+
+def test_config_reports_mock_mode_as_mock(client, monkeypatch):
+    monkeypatch.setenv("MOCK", "1")
+
+    config = client.get("/config").json()
+
+    assert config["mode"] == "mock"
+    assert config["live_model"] is False
+
+
+def test_config_lists_the_demo_repos_that_actually_exist(client, live, monkeypatch, tmp_path):
+    (tmp_path / "shopcart").mkdir()
+    (tmp_path / "notes.md").write_text("not a repo")
+    monkeypatch.setattr(main, "DEMO_REPO_ROOT", tmp_path)
+
+    names = [repo["name"] for repo in client.get("/config").json()["demo_repos"]]
+
+    assert names == ["shopcart"], "only directories, and only ones on this machine"
+
+
+# --- failures a person can act on ---------------------------------------------
+
+
+def test_an_expired_aws_lease_says_to_re_paste_the_keys(monkeypatch):
+    """`ExpiredTokenException` in a stack trace tells nobody what to do about it."""
+    monkeypatch.setenv("LLM_PROVIDER", "bedrock")
+
+    explained = main._explain_credentials(
+        RuntimeError("An error occurred (ExpiredTokenException) calling Converse")
+    )
+
+    assert isinstance(explained, main.ExpiredCredentials)
+    assert "12 hours" in str(explained)
+
+
+def test_an_unrelated_failure_is_passed_through_untouched(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "bedrock")
+    original = RuntimeError("the sandbox refused this patch")
+
+    assert main._explain_credentials(original) is original
+
+
+def test_a_cassette_miss_is_reported_as_the_missing_key_it_usually_is(monkeypatch):
+    from repro.llm.base import SchemaValidationError
+
+    monkeypatch.setenv("LLM_PROVIDER", "fake")
+
+    explained = main._explain_schema_failure(SchemaValidationError("No cassette abc123"))
+
+    assert isinstance(explained, main.NoModelCredentials)
+    assert "ANTHROPIC_API_KEY" in str(explained)
+
+
+def test_a_real_provider_keeps_the_schema_error_it_actually_got(monkeypatch):
+    """With a live model, a schema failure IS a model failure and must not be relabelled."""
+    from repro.llm.base import SchemaValidationError
+
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    original = SchemaValidationError("ReportFacts did not validate after one re-prompt")
+
+    assert main._explain_schema_failure(original) is original
+
+
+def test_a_mock_run_names_the_repository_the_recording_is_of(client):
+    """Not the one the caller asked for: nothing was fetched, and the fixture is
+    a recording of shopcart. A header saying `pallets/flask` above hypotheses in
+    `shopcart/pricing.py` reads as broken rather than as replayed."""
+    run_id = client.post(
+        "/runs",
+        json={"raw_text": "password reset never arrives", "repo_url": "pallets/flask"},
+    ).json()["run_id"]
+
+    events = read_events(client, run_id)
+
+    assert events[0].payload["repo_path"] == "fixtures/demo_repos/shopcart"
+    assert main.RUNS[run_id].report.repo_path == "fixtures/demo_repos/shopcart"
+    # And the record served afterwards agrees with what was on screen.
+    assert client.get(f"/runs/{run_id}").json()["report"]["repo_path"] == (
+        "fixtures/demo_repos/shopcart"
+    )
+
+
+def test_the_repository_a_mock_run_names_comes_from_the_fixture_itself(client, monkeypatch):
+    """So a recording of something else needs no code change to be labelled right."""
+    main.load_fixture.cache_clear()
+    monkeypatch.setattr(
+        main, "load_fixture", lambda path=None: {"repo": "fixtures/demo_repos/ledger"}
+    )
+
+    assert main.fixture_repo() == "fixtures/demo_repos/ledger"

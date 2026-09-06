@@ -512,7 +512,11 @@ def test_the_workspace_is_closed_on_the_way_out_of_a_good_run(monkeypatch):
     monkeypatch.setattr(build_mod, "open_workspace", lambda report: workspace)
     # The graph gets a WorkspaceSandbox over the fake, so the first sandbox call
     # is what fails here -- after the workspace has been handed over.
-    monkeypatch.setattr(build_mod, "WorkspaceSandbox", lambda ws: StubSandbox(test_result=[RED, GREEN]))
+    monkeypatch.setattr(
+        build_mod,
+        "WorkspaceSandbox",
+        lambda ws, **kwargs: StubSandbox(test_result=[RED, GREEN]),
+    )
 
     record = run(report(), happy_path_llm())
 

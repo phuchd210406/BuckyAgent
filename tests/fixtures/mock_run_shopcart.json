@@ -1,5 +1,6 @@
 {
   "_comment": "Mock run for the UI to build against: the golden dataset's shopcart free-postage case, including a FIRST REPRO ATTEMPT THAT FAILS (it tested shipping_cost() in isolation and went green) and a second that succeeds by asserting on total(). That retry is the moment the product looks agentic, so the UI must keep both attempts on screen. 'after_s' is the delay before each event in seconds, scaled by repro.api.main.TIME_SCALE. Generated through the contracts in contracts.py.",
+  "repo": "fixtures/demo_repos/shopcart",
   "events": [
     {
       "after_s": 0.0,

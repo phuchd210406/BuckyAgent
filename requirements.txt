@@ -1,5 +1,10 @@
 # Runtime
 pydantic>=2.7,<3
+
+# The first-party Claude client (LLM_PROVIDER=anthropic). Imported lazily, so
+# the fake and Bedrock paths do not need it -- but a real run without an AWS
+# lease does, and that is the common case on a laptop.
+anthropic>=0.40
 langgraph>=0.2.28
 langchain-core>=0.3
 boto3>=1.34

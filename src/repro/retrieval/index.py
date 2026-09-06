@@ -29,6 +29,7 @@ from __future__ import annotations
 import ast
 import io
 import math
+import os
 import re
 import tokenize
 from collections import Counter
@@ -39,7 +40,17 @@ from repro.contracts import MAX_LOCALISE_CANDIDATES, Hypothesis
 from repro.sandbox.workspace import Workspace
 
 # --- bounds. Everything here ends up in a prompt, so nothing is unbounded. ---
-MAX_FILES = 300
+#
+# MAX_FILES bounds the WORK, not the answer: every file counted here is read and
+# parsed on every search. 300 was right when the only corpus was a seeded
+# fixture; a real repository off GitHub routinely has more, and the cap is then
+# the difference between finding the bug and never looking at the file.
+MAX_FILES = int(os.getenv("REPRO_MAX_INDEX_FILES", "800"))
+
+#: How many paths are considered before the cap is applied. Listing a path is
+#: nearly free; reading and parsing it is not, which is why these differ.
+MAX_CANDIDATE_FILES = 20_000
+
 MAX_FILE_BYTES = 200_000
 SNIPPET_MAX_LINES = 60
 
@@ -432,10 +443,15 @@ def search(
     if k <= 0 or not terms:
         return []
 
-    paths = list(files) if files is not None else list_source_files(ws)
+    paths = (
+        list(files)
+        if files is not None
+        else list_source_files(ws, max_files=MAX_CANDIDATE_FILES)
+    )
+    paths = _prioritise(paths, terms, MAX_FILES)
     units: list[_Unit] = []
     sources: dict[str, list[str]] = {}
-    for rel_path in paths[:MAX_FILES]:
+    for rel_path in paths:
         source = _read(ws, rel_path)
         if source is None:
             continue
@@ -465,6 +481,31 @@ def search(
         (path, _snippet(sources[path], unit), round(score, 4))
         for path, (score, unit) in ranked[:k]
     ]
+
+
+def _prioritise(paths: list[str], terms: list[tuple[str, float]], limit: int) -> list[str]:
+    """The `limit` paths most worth reading, by their PATH alone.
+
+    A repository with more source files than we can afford to parse used to be
+    truncated alphabetically, so on anything large the file holding the bug was
+    excluded before a single word was scored -- silently, and in a way that
+    looks exactly like a model that cannot localise. A path is not much
+    evidence, but `checkout/pricing.py` against a complaint about checkout is
+    far better evidence than the alphabet, and reading a filename is free.
+
+    Ties break on the path, so the same repo and query always index the same
+    files: a snippet ends up in a prompt, and a prompt is a cassette key.
+    """
+    if len(paths) <= limit:
+        return paths
+
+    weights = {term: weight for term, weight in terms}
+
+    def relevance(rel: str) -> float:
+        tokens = set(tokenise(rel.replace("/", " ").replace(".py", "")))
+        return sum(weight for term, weight in weights.items() if term in tokens)
+
+    return sorted(paths, key=lambda rel: (-relevance(rel), rel))[:limit]
 
 
 def _bm25(
