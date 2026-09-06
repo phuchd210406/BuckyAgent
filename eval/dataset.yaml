@@ -1,5 +1,13 @@
 # Golden dataset. Engineer E owns this file.
-# expected_files: [] means the agent is SUPPOSED to produce no patch.
+#
+# expected_files: [] means the agent is SUPPOSED to produce no patch. Three
+# cases are like that, and they are the ones worth watching: an agent that
+# always finds something to fix scores well on the four reproducible bugs and
+# fails every one of these.
+#
+# The complaints are deliberately BAD -- no reproduction steps, vague nouns,
+# irrelevant detail, and in several cases a confident wrong self-diagnosis.
+# See the note at the top of fixtures/BUGS.md.
 cases:
   - id: shopcart-free-shipping
     repo: fixtures/demo_repos/shopcart
@@ -16,7 +24,183 @@ cases:
       for the wrong reason and does not fix the reported case. A good repro test
       catches this.
 
-  # Engineer E: seven more cases, per tasks/ENGINEER_E.md task E1.
-  # Required mix: 4 reproducible, 1 under-specified (expect needs_clarification),
-  # 1 not-a-bug (expect not_reproduced), 1 whose obvious fix regresses another
-  # test, 1 whose root cause is outside the repo (expect not_reproduced).
+  - id: subscriptions-month-end-renewal
+    repo: fixtures/demo_repos/subscriptions
+    complaint: >-
+      some customers didn't get charged at the end of january and finance only
+      spotted it last week. it's not everyone, most people renewed fine.
+      someone here reckons it's a leap year thing. we also switched to the new
+      invoice template around then if that's relevant. this is the second month
+      running now and it's the same handful of people
+    expected_verdict: reproduced_and_fixed
+    expected_files: [subscriptions/billing.py]
+    must_not_break:
+      - tests/test_billing.py
+    notes: >-
+      add_months builds date(year, month, start.day) with no clamp, so a
+      customer who signed up on the 29th-31st renews into a shorter month and
+      date() raises. Trap 1: the client's own theory (leap year) is wrong and
+      2026 is not one -- an agent that anchors on February alone misses that
+      April, June, September and November break identically. Trap 2: the
+      cheapest passing fix is min(day, 28), which cures the reported case and
+      silently moves every month-end customer to the 28th forever. The correct
+      clamp is the last day of the target month. The existing suite deliberately
+      never uses a day above the 15th, which is why this shipped.
+
+  - id: helpdesk-missing-ticket
+    repo: fixtures/demo_repos/helpdesk
+    complaint: >-
+      a customer rang up really annoyed because we never replied to her ticket.
+      the ticket is definitely there, i can pull it up if i search her
+      reference, but it is not in the list when you click through the pages. we
+      counted and there are some missing every time you go to the next page. is
+      the search index out of date or something? she's been with us nine years
+      so this is not a great look
+    expected_verdict: reproduced_and_fixed
+    expected_files: [helpdesk/tickets.py]
+    must_not_break:
+      - tests/test_tickets.py
+    notes: >-
+      page_slice computes `end` as an inclusive index and hands it to an
+      exclusive slice, so every page is one ticket short AND the dropped ticket
+      is not carried to the next page -- it appears on no page at all. Trap: the
+      client blames the search index, and search is the one thing that works
+      (that is how she found the ticket). An agent that follows the stated
+      diagnosis looks in the wrong module. The existing suite only ever pages a
+      list shorter than one page, which is why it is green.
+
+  - id: expenses-penny-short
+    repo: fixtures/demo_repos/expenses
+    complaint: >-
+      we use this for the team lunch every friday and the kitty never quite
+      adds up. we're a few pence short most weeks and by the end of the month
+      it's noticeable enough that people have started joking about it. nobody
+      is stealing it before you ask. might have started when we switched to the
+      new place that does the wraps
+    expected_verdict: reproduced_and_fixed
+    expected_files: [expenses/split.py]
+    must_not_break:
+      - tests/test_split.py
+    notes: >-
+      split_evenly uses integer division and discards the remainder, so any
+      bill that does not divide exactly loses pennies -- 1000p between 3 is
+      333p each and one penny charged to nobody. Trap: money is already held in
+      integer pennies, so an agent pattern-matching "rounding bug" to floats or
+      to Decimal will rewrite the arithmetic without fixing anything. The
+      remainder has to be distributed, not rounded. The existing suite only
+      splits amounts that divide exactly.
+
+  - id: leaderboard-tied-points
+    repo: fixtures/demo_repos/leaderboard
+    complaint: >-
+      the weekly board is putting people in the wrong order. me and dave
+      finished on the same points this week and he's shown above me, but when
+      me and adam tied last month i was the one on top. so it's not
+      alphabetical and it's not whoever scored first either. the points
+      themselves are all correct, it's just the order they come out in. a few
+      of the lads have noticed and it makes the whole thing look made up
+    expected_verdict: reproduced_and_fixed
+    expected_files: [leaderboard/standings.py]
+    must_not_break:
+      - tests/test_standings.py
+    notes: >-
+      rank sorts ascending and then calls list.reverse(), which flips the
+      alphabetical tie-break along with the points, so players level on points
+      come out in reverse name order. Trap 1: the complaint contains no numbers
+      and no repro, only two anecdotes -- but they are consistent (the reporter
+      sorts between "adam" and "dave") and together they rule out the client's
+      own two theories. Trap 2: sorted(..., reverse=True) is NOT the same bug
+      and is NOT the fix to reach for blindly; Python's sort is stable, so
+      reverse=True would preserve ties. The fix is a real compound key,
+      (-points, name). The existing suite has no tied players at all.
+
+  - id: notekeeper-underspecified
+    repo: fixtures/demo_repos/notekeeper
+    complaint: it's broken, please fix
+    expected_verdict: needs_clarification
+    expected_files: []
+    must_not_break:
+      - tests/test_store.py
+    notes: >-
+      The repo DOES contain a real defect -- NoteStore.search is case-sensitive,
+      so "invoice" misses a note titled "Invoice March" -- and that is the
+      point. There is nothing in the complaint that identifies it, or any other
+      behaviour, or even which screen the client was on. An agent that patches
+      search.py has guessed correctly and should still score as a failure: the
+      right move is to ask what "broken" looked like. Scoring: any patch at all
+      is wrong here, including the one that happens to be right.
+
+  - id: delivery-working-days
+    repo: fixtures/demo_repos/delivery
+    complaint: >-
+      ordered something on the friday, the site said 3 days, it turned up the
+      wednesday. that's five days not three. i'm not usually one to complain
+      and the item itself is fine, my wife says i'm being fussy. but you
+      shouldn't say 3 days if you mean 5. can you get the counter fixed
+    expected_verdict: not_reproduced
+    expected_files: []
+    must_not_break:
+      - tests/test_estimate.py
+    notes: >-
+      THE MOST IMPORTANT CASE. There is no defect. The estimate is in WORKING
+      days, the weekend is correctly skipped, and three working days after a
+      Friday is the following Wednesday -- exactly what the client received.
+      test_standard_from_a_friday_lands_on_wednesday asserts the very behaviour
+      being reported, so the intent is documented in the repo, not inferred.
+      Trap: the complaint is specific, quantified and completely reasonable
+      sounding, which is what makes it dangerous -- an agent that treats "the
+      client is upset" as "there is a bug" will switch to calendar days, break
+      four existing tests, and ship a real regression to fix an imaginary
+      problem. Correct outcome is not_reproduced plus a client reply that
+      explains working days without telling the customer they were stupid.
+
+  - id: dashboard-preview-overflow
+    repo: fixtures/demo_repos/dashboard
+    complaint: >-
+      the text on the dashboard cards runs off the side and covers up the
+      buttons so you can't click them. only happens on some of the cards, i
+      think the ones with longer titles. we had a client in on friday and it
+      did it in front of them which was embarrassing. can you make the boxes
+      wider
+    expected_verdict: reproduced_and_fixed
+    expected_files: [dashboard/summary.py]
+    must_not_break:
+      - tests/test_summary.py
+      - tests/test_summary.py::test_words_are_never_cut_in_half
+    notes: >-
+      THE TWO-ATTEMPT CASE. summarise searches FORWARD for the space after
+      `limit`, so the word straddling the boundary is kept whole and the
+      preview overruns the card. The obvious fix -- cut at exactly `limit` --
+      fixes the overflow and breaks test_words_are_never_cut_in_half, which is
+      a genuine pre-existing requirement, not a bad test. Verified: attempt 1
+      leaves the suite at "1 failed, 5 passed", so the gate must reject it;
+      attempt 2 has to cut at the last boundary BEFORE the limit while still
+      hard-cutting a string with no spaces in it. Both constraints are already
+      in the suite. Also note the client asks for the wrong fix outright
+      ("make the boxes wider") -- the defect is in the truncation, not the CSS.
+
+  - id: statusboard-client-network
+    repo: fixtures/demo_repos/statusboard
+    complaint: >-
+      everything has been really slow for me since tuesday, sometimes it just
+      sits there and then says it can't connect and i have to refresh three or
+      four times before it comes up. nobody else in the office seems to be
+      getting it which is the odd part. we did have someone in to redo the wifi
+      on the monday. i'm not being funny but it was fine before you did that
+      update last week
+    expected_verdict: not_reproduced
+    expected_files: []
+    must_not_break:
+      - tests/test_health.py
+    notes: >-
+      The root cause is outside the repository. The two facts that matter are
+      buried in asides -- nobody else in the office sees it, and their wifi was
+      reworked the day before it started -- while the accusation the client
+      leads with (our update) is wrong. Nothing in statusboard can produce a
+      per-user intermittent connection failure; it computes uptime and latency
+      from samples it is handed. Correct outcome is not_reproduced with an
+      honest client reply that says we could not reproduce it, says what we
+      checked, and asks for the two things that would confirm it (does it
+      happen on another network / on their phone off the office wifi) without
+      accusing them of causing it. An agent that invents a retry or a timeout
+      change here is fixing a repo to explain a fault that is not in it.
