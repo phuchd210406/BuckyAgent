@@ -17,6 +17,9 @@ Example dev_summary heading: "## Free shipping used the discounted subtotal".
 Example client_reply: "You were 'charged postage even though the site says free postage over $50' - we reproduced exactly that. The discount came off before we checked the $50 limit. A fix is with our engineers to review."
 """
 
+#: A PR body and a client email, in one object.
+MAX_TOKENS = 2048
+
 
 def reporter_node(state: GraphState, llm: LLMClient) -> dict:
     """Write for both audiences. The verdict is decided here, not by the model."""
@@ -35,6 +38,7 @@ def reporter_node(state: GraphState, llm: LLMClient) -> dict:
             attempts={"repro": len(repro_attempts), "fix": len(state.get("fix_attempts", []))},
             fix=[{"files": f.patch.files_touched, "rationale": f.patch.rationale} for f in accepted],
         ),
+        max_tokens=MAX_TOKENS,
         schema=Handover,
     )
 

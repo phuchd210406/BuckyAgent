@@ -18,6 +18,9 @@ rationale is two sentences: the first quotes the client's own words, the second 
 "The client was 'charged postage even though the site says free postage over $50'. shipping_for compares that threshold against the already-discounted subtotal, so a $55 basket with a promo falls under $50 and is charged."
 """
 
+#: One Hypothesis: a path, a symbol, two sentences.
+MAX_TOKENS = 512
+
 
 def localiser_node(state: GraphState, llm: LLMClient, *, sandbox: Sandbox | None = None) -> dict:
     """Read state, do one job, return ONLY the keys that changed.
@@ -33,6 +36,7 @@ def localiser_node(state: GraphState, llm: LLMClient, *, sandbox: Sandbox | None
     best, response = llm.structured(
         system=SYSTEM_PROMPT,
         user=payload(facts=facts, hits=[{"path": p, "snippet": s} for p, s, _ in hits]),
+        max_tokens=MAX_TOKENS,
         schema=Hypothesis,
     )
 

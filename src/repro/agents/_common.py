@@ -7,18 +7,46 @@ no node can quietly disagree with another about what counts as a reproduction.
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 from typing import Any
 
 from pydantic import BaseModel
 
 from repro.contracts import (
     SANDBOX_MAX_OUTPUT_CHARS,
+    ClientReport,
     ExecutionResult,
     LLMResponse,
     TokenUsage,
     Verdict,
 )
 from repro.graph.state import GraphState
+from repro.llm.base import SchemaValidationError
+
+#: Fields of ClientReport that change on every run and mean nothing to the
+#: model. They are stripped from every prompt because FakeLLM keys cassettes on
+#: a hash of the exact prompt text: leave a uuid and a timestamp in there and
+#: every cassette is unfindable the moment it is written, which silently costs
+#: real money on a path that is supposed to be free.
+VOLATILE_REPORT_FIELDS = frozenset({"run_id", "received_at"})
+
+
+@lru_cache(maxsize=1)
+def model_failures() -> tuple[type[BaseException], ...]:
+    """Exceptions meaning "the model did not give us a usable object".
+
+    Both are recoverable inside a bounded loop: the node spends an attempt and
+    tries again, rather than taking the whole run down. TruncatedResponseError
+    lives in bedrock.py, so it is imported lazily -- the fake and stub paths
+    must not need boto3 to run.
+    """
+    failures: list[type[BaseException]] = [SchemaValidationError]
+    try:
+        from repro.llm.bedrock import TruncatedResponseError
+    except ImportError:  # pragma: no cover - boto3 absent
+        return tuple(failures)
+    failures.append(TruncatedResponseError)
+    return tuple(failures)
 
 
 def payload(**parts: Any) -> str:
@@ -32,6 +60,9 @@ def payload(**parts: Any) -> str:
 
 
 def _plain(value: Any) -> Any:
+    if isinstance(value, ClientReport):
+        # Never the run id or the received-at stamp: see VOLATILE_REPORT_FIELDS.
+        return value.model_dump(mode="json", exclude=set(VOLATILE_REPORT_FIELDS))
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
     if isinstance(value, (list, tuple)):

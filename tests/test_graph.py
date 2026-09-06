@@ -14,6 +14,9 @@ from pathlib import Path
 
 import pytest
 
+from repro.agents import fix as fix_module
+from repro.agents import intake, localiser, reporter, repro_agent
+from repro.agents.fix import fix_node
 from repro.contracts import (
     MAX_FIX_ATTEMPTS,
     MAX_REPRO_ATTEMPTS,
@@ -34,7 +37,10 @@ from repro.contracts import (
 from repro.contracts import TestArtifact as GeneratedTest
 from repro.graph import build as build_mod
 from repro.graph.build import assemble_run_record, budget_exhausted, build_graph, run
-from repro.llm.fake import ScriptedLLM
+from repro.graph.sandbox_seam import WorkspaceSandbox, unsafe_test_path
+from repro.llm.base import SchemaValidationError
+from repro.llm.fake import ScriptedLLM, cassette_key
+from repro.sandbox.workspace import Workspace
 from repro.settings import Settings
 
 GREEN = ExecutionResult(exit_code=0, stdout_tail="", stderr_tail="", duration_s=0.1)
@@ -573,3 +579,270 @@ def test_assemble_run_record_survives_a_run_that_stopped_early():
     assert record.handover is None
     assert record.usage.calls == 0
     assert record.check_invariants() == []
+
+
+# --- the model's test path is untrusted input ---------------------------------
+
+
+def bad_test(path: str) -> GeneratedTest:
+    return GeneratedTest(path=path, source="x = 1\n")
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "shopcart/pricing.py",  # would overwrite the source it is meant to test
+        "../escape.py",
+        "/etc/passwd",
+        "-x",  # pytest would read this as a flag
+        "tests/notes.txt",
+        "",
+        "tests/",
+    ],
+)
+def test_unsafe_test_paths_are_named_and_refused(path):
+    assert unsafe_test_path(path) is not None
+
+
+@pytest.mark.parametrize("path", ["tests/test_bug.py", "tests/repro/test_bug.py"])
+def test_a_test_under_tests_is_allowed(path):
+    assert unsafe_test_path(path) is None
+
+
+class RefusingSandbox(StubSandbox):
+    """A sandbox that refuses the write, the way the real one refuses a bad path."""
+
+    def write_test(self, test) -> None:
+        raise ValueError(f"refusing to write {test.path!r}: nope")
+
+
+def test_a_test_written_outside_tests_is_never_written_and_never_crashes():
+    sandbox = StubSandbox(test_result=RED)  # red, so a write WOULD look like a repro
+    llm = ScriptedLLM(
+        [facts(), hypothesis()]
+        + [bad_test("shopcart/pricing.py") for _ in range(MAX_REPRO_ATTEMPTS)]
+        + [handover()]
+    )
+
+    out = invoke(llm, sandbox)
+
+    assert sandbox.writes == []  # the source file was never touched
+    assert sandbox.test_runs == 0  # and nothing was run against it
+    assert not any(a.reproduced for a in out["repro_attempts"])
+    assert "outside 'tests/'" in out["repro_attempts"][0].reasoning
+    # The run is still bounded and still ends properly.
+    assert out["repro_count"] == MAX_REPRO_ATTEMPTS
+    assert out["verdict"] == Verdict.NOT_REPRODUCED
+
+
+def test_a_sandbox_refusal_is_a_spent_attempt_not_a_dead_run():
+    llm = ScriptedLLM(
+        [facts(), hypothesis()]
+        + [generated_test(i) for i in range(MAX_REPRO_ATTEMPTS)]
+        + [handover()]
+    )
+
+    out = invoke(llm, RefusingSandbox(test_result=RED))
+
+    assert out["repro_count"] == MAX_REPRO_ATTEMPTS
+    assert out["verdict"] == Verdict.NOT_REPRODUCED
+    assert all("refused" in a.reasoning.lower() for a in out["repro_attempts"])
+    assert all(a.result.errors == 1 for a in out["repro_attempts"])
+
+
+def test_the_real_sandbox_refuses_to_write_outside_tests(tmp_path):
+    source = tmp_path / "shopcart"
+    source.mkdir()
+    (source / "pricing.py").write_text("def total():\n    return 0\n")
+    ws = Workspace(source, root=tmp_path / "ws")
+    box = WorkspaceSandbox(ws)
+    try:
+        with pytest.raises(ValueError, match="outside 'tests/'"):
+            box.write_test(bad_test("pricing.py"))
+        assert (ws.path / "pricing.py").read_text() == "def total():\n    return 0\n"
+
+        box.write_test(GeneratedTest(path="tests/test_ok.py", source="def test_ok():\n    pass\n"))
+        assert (ws.path / "tests" / "test_ok.py").exists()
+    finally:
+        ws.close()
+
+
+def test_a_patch_is_never_verified_against_the_whole_suite():
+    # No reproduced attempt means no target test. An empty target is "run
+    # everything" to pytest, which would accept a patch on the suite alone.
+    sandbox = StubSandbox(test_result=GREEN, suite_result=GREEN)
+
+    out = fix_node({"report": report(), "fix_count": 0}, ScriptedLLM([patch()]), sandbox=sandbox)
+
+    attempt = out["fix_attempts"][0]
+    assert attempt.accepted is False
+    assert sandbox.test_runs == 0
+    assert sandbox.suite_runs == 0
+    assert "no reproduced test" in attempt.target_test.stderr_tail
+
+
+# --- living with the real LLM client ------------------------------------------
+#
+# Engineer C's BedrockLLM raises rather than returning a half-filled object, and
+# FakeLLM raises when a cassette is missing. Both land in these nodes.
+
+
+class BrokenLLM:
+    """A model that cannot produce one particular schema, ever."""
+
+    def __init__(self, inner: ScriptedLLM, breaks_on: type):
+        self.inner = inner
+        self.breaks_on = breaks_on
+        self.attempts = 0
+
+    @property
+    def calls(self):
+        return self.inner.calls
+
+    def complete(self, **kw):
+        return self.inner.complete(**kw)
+
+    def structured(self, **kw):
+        if kw["schema"] is self.breaks_on:
+            self.attempts += 1
+            self.inner.calls.append((kw["system"], kw["user"]))
+            raise SchemaValidationError(f"{self.breaks_on.__name__} did not validate twice")
+        return self.inner.structured(**kw)
+
+
+def test_a_model_that_cannot_write_a_test_spends_attempts_instead_of_killing_the_run():
+    llm = BrokenLLM(ScriptedLLM([facts(), hypothesis(), handover()]), GeneratedTest)
+    sandbox = StubSandbox(test_result=RED)
+
+    out = invoke(llm, sandbox)
+
+    assert llm.attempts == MAX_REPRO_ATTEMPTS  # tried, bounded, gave up
+    assert out["repro_count"] == MAX_REPRO_ATTEMPTS
+    assert not any(a.reproduced for a in out["repro_attempts"])
+    assert sandbox.writes == [] and sandbox.test_runs == 0
+    assert "SchemaValidationError" in out["repro_attempts"][0].reasoning
+    assert out["verdict"] == Verdict.NOT_REPRODUCED
+
+
+def test_a_model_that_cannot_write_a_patch_spends_attempts_instead_of_killing_the_run():
+    llm = BrokenLLM(ScriptedLLM([facts(), hypothesis(), generated_test(), handover()]), Patch)
+    sandbox = StubSandbox(test_result=RED)
+
+    out = invoke(llm, sandbox)
+
+    assert llm.attempts == MAX_FIX_ATTEMPTS
+    assert out["fix_count"] == MAX_FIX_ATTEMPTS
+    assert not any(f.accepted for f in out["fix_attempts"])
+    assert sandbox.patches == []  # nothing was ever applied
+    assert out["verdict"] == Verdict.REPRODUCED_NOT_FIXED
+
+
+def test_a_failed_model_call_is_still_billed():
+    # Otherwise a node that retries on failure retries for free, and
+    # MAX_TOTAL_LLM_CALLS stops bounding anything.
+    llm = BrokenLLM(ScriptedLLM([facts(), hypothesis(), handover()]), GeneratedTest)
+
+    out = invoke(llm, StubSandbox(test_result=RED))
+
+    # intake + localise + 3 failed repro calls + report.
+    assert out["usage"].calls == 2 + MAX_REPRO_ATTEMPTS + 1
+
+
+def test_the_code_generating_nodes_raise_the_token_ceiling():
+    # A TestArtifact carries a whole test file and a Patch a whole diff; the
+    # client's 1024 default truncates them, and a truncated reply is refused
+    # rather than parsed, which would cost an attempt for nothing.
+    assert repro_agent.MAX_TOKENS >= 4096
+    assert fix_module.MAX_TOKENS >= 4096
+    assert reporter.MAX_TOKENS > 1024  # a PR body plus a client email
+
+
+def test_every_node_states_its_own_ceiling():
+    spy = SpyLLM(ScriptedLLM([facts(), hypothesis(), generated_test(), patch(), handover()]))
+
+    invoke(spy, StubSandbox(test_result=[RED, GREEN]))
+
+    assert spy.ceilings == [
+        intake.MAX_TOKENS,
+        localiser.MAX_TOKENS,
+        repro_agent.MAX_TOKENS,
+        fix_module.MAX_TOKENS,
+        reporter.MAX_TOKENS,
+    ]
+
+
+class SpyLLM:
+    def __init__(self, inner):
+        self.inner = inner
+        self.ceilings: list[int] = []
+
+    @property
+    def calls(self):
+        return self.inner.calls
+
+    def complete(self, **kw):
+        self.ceilings.append(kw.get("max_tokens"))
+        return self.inner.complete(**kw)
+
+    def structured(self, **kw):
+        self.ceilings.append(kw.get("max_tokens"))
+        return self.inner.structured(**kw)
+
+
+def test_two_runs_of_the_same_complaint_hit_the_same_cassette():
+    """The offline demo and CI both depend on this.
+
+    FakeLLM finds a reply by hashing the exact prompt. The report carries a
+    fresh uuid and a fresh timestamp on every run, so leaving those in the
+    prompt made every recorded cassette unfindable the moment it was written --
+    a silently broken `LLM_PROVIDER=fake` that falls back to real spend.
+    """
+    first = ClientReport(run_id="run-a", raw_text="Charged twice.", repo_path="/tmp/shopcart")
+    second = ClientReport(run_id="run-b", raw_text="Charged twice.", repo_path="/tmp/shopcart")
+
+    spy_a, spy_b = SpyLLM(ScriptedLLM([facts()])), SpyLLM(ScriptedLLM([facts()]))
+    intake.intake_node({"report": first}, spy_a)
+    intake.intake_node({"report": second}, spy_b)
+
+    (system_a, user_a), (system_b, user_b) = spy_a.calls[0], spy_b.calls[0]
+    assert user_a == user_b, "the prompt still carries something run-specific"
+    assert cassette_key(system_a, user_a, "ReportFacts") == cassette_key(
+        system_b, user_b, "ReportFacts"
+    )
+    assert "run-a" not in user_a and "received_at" not in user_a
+    assert "Charged twice." in user_a  # the complaint itself is still there
+
+
+def test_a_recorded_run_replays_as_a_different_run(tmp_path, monkeypatch):
+    """The offline path, end to end: RecordingLLM -> cassettes -> FakeLLM.
+
+    This is `make demo` and the wifi-died fallback. It only works if the prompt
+    text is identical across runs, so it is the real regression test for
+    VOLATILE_REPORT_FIELDS.
+    """
+    from repro.agents import _common
+    from repro.llm.bedrock import RecordingLLM
+    from repro.llm.fake import FakeLLM
+
+    def script():
+        return [facts(), hypothesis(), generated_test(), patch(), handover()]
+
+    def a_report(run_id: str) -> ClientReport:
+        return ClientReport(run_id=run_id, raw_text="Charged twice.", repo_path="/tmp/shopcart")
+
+    recorder = RecordingLLM(ScriptedLLM(script()), cassette_dir=str(tmp_path), enabled=True)
+    recorded = run(a_report("live"), recorder, sandbox=StubSandbox(test_result=[RED, GREEN]))
+    assert len(recorder.written) == 5
+
+    # A new run id, a new received_at, no script: everything comes off disk.
+    replayed = run(a_report("replay"), FakeLLM(tmp_path), sandbox=StubSandbox(test_result=[RED, GREEN]))
+
+    assert replayed.verdict == recorded.verdict == Verdict.REPRODUCED_AND_FIXED
+    assert replayed.handover == recorded.handover
+    assert replayed.check_invariants() == []
+
+    # And prove the stripping is what makes it work: put the volatile fields
+    # back in the prompt and the very first cassette lookup misses.
+    monkeypatch.setattr(_common, "VOLATILE_REPORT_FIELDS", frozenset())
+    with pytest.raises(SchemaValidationError, match="No cassette"):
+        run(a_report("third"), FakeLLM(tmp_path), sandbox=StubSandbox(test_result=[RED, GREEN]))

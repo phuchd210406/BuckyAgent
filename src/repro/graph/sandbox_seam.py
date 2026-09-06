@@ -12,6 +12,7 @@ do it.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Protocol
 
 from repro.contracts import (
@@ -29,6 +30,37 @@ from repro.sandbox.runner import run_pytest as _run_pytest
 from repro.sandbox.workspace import Workspace
 
 Hit = tuple[str, str, float]
+
+#: The agent may write here and nowhere else (ARCHITECTURE.md, "Allow-list").
+TEST_DIR = "tests/"
+
+
+def unsafe_test_path(path: str) -> str | None:
+    """Why this test path may not be written, or None if it is fine.
+
+    `TestArtifact.path` says "must start with 'tests/' and end '.py'", but that
+    is a *description* -- prompt text for the model, not a pydantic constraint.
+    Nothing enforced it, so a model that answered with 'shopcart/pricing.py'
+    had its "test" written straight over the source file it was supposed to be
+    testing, inside the workspace the fix is then verified in.
+    """
+    raw = (path or "").strip()
+    if not raw:
+        return "the path is empty"
+    if "\x00" in raw:
+        return "the path contains a NUL byte"
+    if raw.startswith("-"):
+        return f"{raw!r} starts with '-', which pytest reads as a flag rather than a file"
+    candidate = Path(raw)
+    if candidate.is_absolute() or candidate.anchor:
+        return f"{raw!r} is absolute; test paths are relative to the workspace root"
+    if ".." in candidate.parts:
+        return f"{raw!r} contains '..' and could escape the workspace"
+    if not raw.startswith(TEST_DIR):
+        return f"{raw!r} is outside {TEST_DIR!r}: the agent may only write tests"
+    if not raw.endswith(".py"):
+        return f"{raw!r} does not end in '.py' and pytest would never collect it"
+    return None
 
 
 class Sandbox(Protocol):
@@ -66,6 +98,12 @@ class WorkspaceSandbox:
         return _rank_candidates(hits, k)
 
     def write_test(self, test: TestArtifact) -> None:
+        # The security boundary, not a lint: Workspace.write_file is generic on
+        # purpose (the patcher needs it), so "only under tests/" is enforced
+        # here, at the one place a model-chosen path becomes a write.
+        problem = unsafe_test_path(test.path)
+        if problem:
+            raise ValueError(f"refusing to write {test.path!r}: {problem}")
         self.ws.write_file(test.path, test.source)
 
     def run_test(self, test_path: str) -> ExecutionResult:

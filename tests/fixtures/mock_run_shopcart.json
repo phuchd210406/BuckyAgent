@@ -1,0 +1,281 @@
+{
+  "_comment": "Mock run for the UI to build against: a realistic shopcart double-charge, including a FIRST REPRO ATTEMPT THAT FAILS and a second that succeeds. That retry is the moment the product looks agentic, so the UI must handle it. 'after_s' is the delay before each event, in seconds, scaled by repro.api.main.TIME_SCALE. Generated through the contracts in contracts.py.",
+  "events": [
+    {
+      "after_s": 0.0,
+      "type": "run_started",
+      "label": "Run started",
+      "payload": {}
+    },
+    {
+      "after_s": 0.1,
+      "type": "node_started",
+      "label": "Reading the report",
+      "payload": {
+        "node": "intake"
+      }
+    },
+    {
+      "after_s": 2.0,
+      "type": "node_finished",
+      "label": "Report understood: checkout charged twice",
+      "payload": {
+        "node": "intake",
+        "confidence": 0.82,
+        "observed_behaviour": "The customer's card was charged twice for a single checkout.",
+        "missing": []
+      }
+    },
+    {
+      "after_s": 0.1,
+      "type": "node_started",
+      "label": "Searching the code",
+      "payload": {
+        "node": "localise"
+      }
+    },
+    {
+      "after_s": 1.6,
+      "type": "hypothesis",
+      "label": "shopcart/checkout.py::submit",
+      "payload": {
+        "file_path": "shopcart/checkout.py",
+        "symbol": "submit",
+        "rationale": "The reporter pressed Pay twice after the page hung. submit() calls the gateway without recording that a charge was already made.",
+        "confidence": 0.74
+      }
+    },
+    {
+      "after_s": 0.6,
+      "type": "hypothesis",
+      "label": "shopcart/gateway.py::charge",
+      "payload": {
+        "file_path": "shopcart/gateway.py",
+        "symbol": "charge",
+        "rationale": "charge() has no idempotency key, so two calls for one order are two charges. Secondary to the caller that makes both calls.",
+        "confidence": 0.41
+      }
+    },
+    {
+      "after_s": 0.8,
+      "type": "node_finished",
+      "label": "2 candidates found",
+      "payload": {
+        "node": "localise",
+        "candidates": 2
+      }
+    },
+    {
+      "after_s": 0.2,
+      "type": "node_started",
+      "label": "Writing a failing test (attempt 1 of 3)",
+      "payload": {
+        "node": "repro",
+        "attempt_no": 1
+      }
+    },
+    {
+      "after_s": 8.0,
+      "type": "repro_attempt",
+      "label": "Attempt 1: the test passed, so nothing was reproduced",
+      "payload": {
+        "attempt_no": 1,
+        "reproduced": false,
+        "test_path": "tests/test_repro_double_charge.py",
+        "passed": 1,
+        "failed": 0,
+        "errors": 0,
+        "reasoning": "The test ran and PASSED, so it did not reproduce anything. It submitted a single confirmed order, which was never the reported situation: the reporter pressed Pay a second time after the page hung. The next attempt must model the unconfirmed retry."
+      }
+    },
+    {
+      "after_s": 0.3,
+      "type": "node_started",
+      "label": "Revising the hypothesis (attempt 2 of 3)",
+      "payload": {
+        "node": "repro",
+        "attempt_no": 2
+      }
+    },
+    {
+      "after_s": 8.0,
+      "type": "repro_attempt",
+      "label": "Attempt 2: reproduced - two charges of 42.00",
+      "payload": {
+        "attempt_no": 2,
+        "reproduced": true,
+        "test_path": "tests/test_repro_double_charge.py",
+        "passed": 0,
+        "failed": 1,
+        "errors": 0,
+        "reasoning": "The test ran and failed on the assertion, and the failure is the client's complaint in code: two charges of 42.00 for one order."
+      }
+    },
+    {
+      "after_s": 0.2,
+      "type": "node_started",
+      "label": "Proposing a patch",
+      "payload": {
+        "node": "fix",
+        "attempt_no": 1
+      }
+    },
+    {
+      "after_s": 9.0,
+      "type": "fix_attempt",
+      "label": "Patch accepted: repro test green, suite green",
+      "payload": {
+        "attempt_no": 1,
+        "accepted": true,
+        "files_touched": [
+          "shopcart/checkout.py"
+        ],
+        "target_test_green": true,
+        "suite_green": true,
+        "suite_passed": 47
+      }
+    },
+    {
+      "after_s": 0.2,
+      "type": "node_started",
+      "label": "Writing the handover",
+      "payload": {
+        "node": "report"
+      }
+    },
+    {
+      "after_s": 2.0,
+      "type": "node_finished",
+      "label": "Handover written",
+      "payload": {
+        "node": "report"
+      }
+    },
+    {
+      "after_s": 0.1,
+      "type": "verdict",
+      "label": "Reproduced and fixed",
+      "payload": {
+        "verdict": "reproduced_and_fixed",
+        "usd": 0.0339,
+        "calls": 7
+      }
+    }
+  ],
+  "record": {
+    "facts": {
+      "observed_behaviour": "The customer's card was charged twice for a single checkout.",
+      "expected_behaviour": "One checkout should produce exactly one charge.",
+      "steps": [
+        "Added a jacket to the basket",
+        "Pressed Pay on the checkout page",
+        "The page hung, so pressed Pay again"
+      ],
+      "entrypoint_hint": "checkout",
+      "environment": "Safari on iPhone",
+      "missing": [],
+      "confidence": 0.82
+    },
+    "questions": [],
+    "hypotheses": [
+      {
+        "file_path": "shopcart/checkout.py",
+        "symbol": "submit",
+        "rationale": "The reporter pressed Pay twice after the page hung. submit() calls the gateway without recording that a charge was already made.",
+        "confidence": 0.74
+      },
+      {
+        "file_path": "shopcart/gateway.py",
+        "symbol": "charge",
+        "rationale": "charge() has no idempotency key, so two calls for one order are two charges. Secondary to the caller that makes both calls.",
+        "confidence": 0.41
+      }
+    ],
+    "repro_attempts": [
+      {
+        "attempt_no": 1,
+        "test": {
+          "path": "tests/test_repro_double_charge.py",
+          "source": "from shopcart.checkout import submit\nfrom shopcart.gateway import FakeGateway\n\n\ndef test_order_is_charged_once():\n    gateway = FakeGateway()\n    submit(order=make_order(total=42.00), gateway=gateway)\n    assert gateway.charges == [42.00]\n"
+        },
+        "result": {
+          "exit_code": 0,
+          "stdout_tail": "tests/test_repro_double_charge.py .                    [100%]\n\n1 passed in 0.42s\n",
+          "stderr_tail": "",
+          "duration_s": 1.31,
+          "timed_out": false,
+          "passed": 1,
+          "failed": 0,
+          "errors": 0
+        },
+        "reproduced": false,
+        "reasoning": "The test ran and PASSED, so it did not reproduce anything. It submitted a single confirmed order, which was never the reported situation: the reporter pressed Pay a second time after the page hung. The next attempt must model the unconfirmed retry."
+      },
+      {
+        "attempt_no": 2,
+        "test": {
+          "path": "tests/test_repro_double_charge.py",
+          "source": "from shopcart.checkout import submit\nfrom shopcart.gateway import FakeGateway\nfrom shopcart.orders import make_order\n\n\ndef test_retrying_an_unconfirmed_order_charges_once():\n    gateway = FakeGateway(confirm=False)\n    order = make_order(total=42.00)\n    submit(order, gateway)\n    assert gateway.charges == [42.00], gateway.charges\n"
+        },
+        "result": {
+          "exit_code": 1,
+          "stdout_tail": "tests/test_repro_double_charge.py F                    [100%]\n\n=================================== FAILURES ===================================\n___________________ test_retrying_an_unconfirmed_order_charges_once ____________\nE       AssertionError: [42.0, 42.0]\nE       assert [42.0, 42.0] == [42.0]\n\n1 failed in 0.51s\n",
+          "stderr_tail": "",
+          "duration_s": 1.44,
+          "timed_out": false,
+          "passed": 0,
+          "failed": 1,
+          "errors": 0
+        },
+        "reproduced": true,
+        "reasoning": "The test ran and failed on the assertion, and the failure is the client's complaint in code: two charges of 42.00 for one order."
+      }
+    ],
+    "fix_attempts": [
+      {
+        "attempt_no": 1,
+        "patch": {
+          "unified_diff": "--- a/shopcart/checkout.py\n+++ b/shopcart/checkout.py\n@@ -38,8 +38,12 @@ def submit(order, gateway):\n     if order.total <= 0:\n         raise ValueError('nothing to charge')\n\n-    gateway.charge(order.total)\n-    if not order.confirmed:\n-        gateway.charge(order.total)\n+    # One order, one charge: a retry returns the charge we already made\n+    # instead of making a second one.\n+    if order.charge_id is not None:\n+        return order.charge_id\n+\n+    order.charge_id = gateway.charge(order.total)\n+    return order.charge_id\n",
+          "files_touched": [
+            "shopcart/checkout.py"
+          ],
+          "rationale": "submit() charged again whenever the order was not yet confirmed, so a retry billed the customer twice. Recording the charge id makes the second call return the first charge instead of creating one."
+        },
+        "target_test": {
+          "exit_code": 0,
+          "stdout_tail": "tests/test_repro_double_charge.py .                    [100%]\n\n1 passed in 0.49s\n",
+          "stderr_tail": "",
+          "duration_s": 1.38,
+          "timed_out": false,
+          "passed": 1,
+          "failed": 0,
+          "errors": 0
+        },
+        "suite": {
+          "exit_code": 0,
+          "stdout_tail": "47 passed in 6.12s\n",
+          "stderr_tail": "",
+          "duration_s": 6.94,
+          "timed_out": false,
+          "passed": 47,
+          "failed": 0,
+          "errors": 0
+        },
+        "accepted": true,
+        "reasoning": "The repro test went green and all 47 pre-existing tests stayed green."
+      }
+    ],
+    "verdict": "reproduced_and_fixed",
+    "handover": {
+      "dev_summary": "## Double charge on checkout retry\n\n**Root cause.** `shopcart/checkout.py::submit` calls `gateway.charge()` and then calls it a second time when `order.confirmed` is false. A customer who presses Pay again after a hung page is billed twice.\n\n**Reproduction.** `tests/test_repro_double_charge.py` fails on `main` with `assert [42.0, 42.0] == [42.0]` and passes with this patch.\n\n**Verification.** Repro test red to green; the 47 pre-existing tests stayed green. Attempt 1 did not reproduce (it submitted a confirmed order) and was discarded.\n\n**Not done.** `gateway.charge()` still has no idempotency key. Worth a separate issue.\n",
+      "client_reply": "Thank you for the report, and sorry about the double charge.\n\nWe were able to see the problem for ourselves: when the payment page hangs and you press Pay a second time, our system was treating that as a second purchase instead of a retry of the first one. That is our bug, not anything you did.\n\nWe have a fix ready and it is with a developer for review. Once it is released, pressing Pay again after a hang will not charge you a second time. Someone from support will be in touch about refunding the extra charge."
+    },
+    "usage": {
+      "input_tokens": 18432,
+      "output_tokens": 3110,
+      "calls": 7,
+      "usd": 0.0339
+    },
+    "wall_clock_s": 33.2
+  }
+}

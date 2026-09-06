@@ -20,12 +20,16 @@ Example - "the app is broken, i cant sign in any more":
 observed_behaviour "cannot sign in"; expected_behaviour null; steps ["tried to sign in"], NOT ["entered password", "clicked submit"]; missing ["expected_behaviour", "steps", "environment"].
 """
 
+#: A ReportFacts is a handful of short strings.
+MAX_TOKENS = 1024
+
 
 def intake_node(state: GraphState, llm: LLMClient) -> dict:
     """Read state, do one job, return ONLY the keys that changed."""
     facts, response = llm.structured(
         system=SYSTEM_PROMPT,
         user=payload(report=state["report"]),
+        max_tokens=MAX_TOKENS,
         schema=ReportFacts,
     )
     return {"facts": facts, "usage": add_usage(state, response)}

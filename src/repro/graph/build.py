@@ -147,16 +147,35 @@ class _MeteredLLM:
         return delta
 
     def complete(self, *, system: str, user: str, max_tokens: int = 1024) -> LLMResponse:
-        response = self._inner.complete(system=system, user=user, max_tokens=max_tokens)
+        try:
+            response = self._inner.complete(system=system, user=user, max_tokens=max_tokens)
+        except Exception:
+            self._charge_for_a_failed_call()
+            raise
         self._delta = self._delta.merge(response.usage)
         return response
 
     def structured(self, *, system: str, user: str, schema, max_tokens: int = 1024):
-        obj, response = self._inner.structured(
-            system=system, user=user, schema=schema, max_tokens=max_tokens
-        )
+        try:
+            obj, response = self._inner.structured(
+                system=system, user=user, schema=schema, max_tokens=max_tokens
+            )
+        except Exception:
+            self._charge_for_a_failed_call()
+            raise
         self._delta = self._delta.merge(response.usage)
         return obj, response
+
+    def _charge_for_a_failed_call(self) -> None:
+        """A call that raised was still a call, and Bedrock still billed it.
+
+        The nodes that loop now survive a schema failure and try again, so an
+        uncounted failure would be a free retry -- exactly the hole
+        MAX_TOTAL_LLM_CALLS exists to close. The tokens are not recoverable
+        through the protocol (the exception carries no usage), so the count is
+        charged and the dollars are not: the call cap still binds.
+        """
+        self._delta = self._delta.merge(TokenUsage(calls=1))
 
 
 # ---------------------------------------------------------------------------

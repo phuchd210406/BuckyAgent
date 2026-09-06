@@ -30,6 +30,9 @@ GOOD: "When you tried to pay, did you see an error message, or did the page just
 One question only. They may not reply twice.
 """
 
+#: One plain-language question.
+MAX_TOKENS = 512
+
 
 def clarify_node(state: GraphState, llm: LLMClient) -> dict:
     """Read state, do one job, return ONLY the keys that changed."""
@@ -41,6 +44,7 @@ def clarify_node(state: GraphState, llm: LLMClient) -> dict:
             facts=facts,
             missing=list(facts.missing) if facts else [],
         ),
+        max_tokens=MAX_TOKENS,
         schema=ClarifyingQuestion,
     )
     # clarify_rounds is incremented by the graph, never here.
