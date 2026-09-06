@@ -1,44 +1,17 @@
-feat(agents): add system prompts for the five agent roles; add fake sandbox for graph testing
+feat(sandbox): add FakeWorkspace and scripted runner for graph testing
 
-Write the SYSTEM_PROMPT constant in each of the five files under
-src/repro/agents/, replacing Engineer A's placeholders. No function
-bodies changed — prompt constants only. Each prompt states the role in
-one line, the output contract, what not to do, and one worked example,
-and stays under 250 tokens since it's resent on every loop step.
+Create src/repro/sandbox/fake.py so Engineer A can simulate sandbox
+outcomes without running real tests, matching Workspace's real
+signatures exactly.
 
-- intake: extract ReportFacts from only what the reporter said; if
-  expected behaviour wasn't stated, expected_behaviour is null and goes
-  in missing. Prevents fabricating plausible steps.
-- clarify: at most 3 questions for a non-technical person; bans file
-  names, stack traces, "console", "network tab", "reproduce"; includes
-  a good/bad question pair.
-- localiser: up to 5 Hypotheses ranked by how directly the code explains
-  the observed behaviour, not by how interesting the code is; rationale
-  must quote the client's own words.
-- repro_agent: write one pytest test that fails because of the reported
-  bug; no network, no mocks of the code under test, assert the client's
-  described behaviour rather than the current implementation's; a
-  passing test means the reproduction failed. Includes the shopcart
-  worked example.
-- fix: smallest patch that makes the failing test pass without changing
-  other tests; bans touching the test file, weakening assertions,
-  swallowing symptoms with try/except, unrelated formatting changes; if
-  the real fix requires changing an existing test, return no patch and
-  explain why.
-- reporter: dev_summary (root cause, diff rationale, evidence trail) and
-  client_reply (plain language, echoes the reporter's own words, never
-  implies a fix shipped unless verdict is REPRODUCED_AND_FIXED); one
-  worked example of each.
+- FakeWorkspace and a scripted runner that returns a queue of prepared
+  ExecutionResult objects
+- Convenience constructors: green_result(), red_result(failed=1),
+  timeout_result(), import_error_result()
 
-Add src/repro/sandbox/fake.py with FakeWorkspace and a scripted runner
-that returns a queue of prepared ExecutionResult objects, matching the
-real Workspace/runner signatures exactly. Include convenience
-constructors: green_result(), red_result(failed=1), timeout_result(),
-import_error_result().
+Add a test using inspect.signature that asserts FakeWorkspace and
+Workspace expose the same public method names and signatures. If the
+two ever drift, this test breaks the build instead of letting
+Engineer A's suite silently lie about the real system.
 
-Add a test using inspect.signature asserting FakeWorkspace and
-Workspace expose the same public method names and signatures, so any
-drift between them breaks the build instead of silently lying to
-Engineer A's test suite.
-
-Unblocks Engineer A's graph tests against the real interfaces.
+Unblocks Engineer A's graph test suite — post in team channel once merged.
