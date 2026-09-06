@@ -21,6 +21,20 @@ export default function RunForm({
   const started = status !== 'idle'
   const usingGithub = source === 'github'
   const ready = rawText.trim() && (usingGithub ? repoUrl.trim() : repoPath)
+  const selectedDemo = demoRepos.find((repo) => repo.path === repoPath)
+  const seeded = new Set(demoRepos.map((repo) => repo.complaint).filter(Boolean))
+
+  /* Selecting a seeded repository fills in the complaint written for it —
+     these cases only mean anything as a pair, and until now the complaint lived
+     in eval/dataset.yaml where nobody using the app could read it.
+
+     It replaces the box only when the box is empty or still holds ANOTHER
+     seeded complaint. Something typed by hand is never overwritten. */
+  function chooseDemo(path) {
+    setRepoPath(path)
+    const complaint = demoRepos.find((repo) => repo.path === path)?.complaint
+    if (complaint && (!rawText.trim() || seeded.has(rawText.trim()))) setRawText(complaint)
+  }
 
   return (
     <form
@@ -104,6 +118,7 @@ export default function RunForm({
             <span className="field-hint">
               Cloned shallow, copied to a throwaway sandbox, never written to. Python +
               pytest projects only; a private repo needs GITHUB_TOKEN on the backend.
+              Browse what was cloned in the <strong>Code</strong> tab.
             </span>
           </>
         ) : (
@@ -113,15 +128,29 @@ export default function RunForm({
               value={repoPath}
               disabled={running}
               aria-label="demo repository"
-              onChange={(change) => setRepoPath(change.target.value)}
+              onChange={(change) => chooseDemo(change.target.value)}
             >
               {demoRepos.map((repo) => (
                 <option key={repo.path} value={repo.path}>
-                  {repo.name} — seeded bug, stdlib only
+                  {repo.name}
+                  {repo.expected_verdict ? ` — ${repo.expected_verdict.replace(/_/g, ' ')}` : ''}
                 </option>
               ))}
             </select>
-            <span className="field-hint">Copied to a throwaway sandbox. Never written to.</span>
+            {selectedDemo?.complaint && rawText.trim() !== selectedDemo.complaint && (
+              <button
+                className="linkish"
+                type="button"
+                disabled={running}
+                onClick={() => setRawText(selectedDemo.complaint)}
+              >
+                use this repo's client complaint
+              </button>
+            )}
+            <span className="field-hint">
+              Copied to a throwaway sandbox. Never written to. Its code and the complaint
+              written for it are in the <strong>Code</strong> tab.
+            </span>
           </>
         )}
       </div>

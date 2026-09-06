@@ -708,3 +708,106 @@ def test_the_repository_a_mock_run_names_comes_from_the_fixture_itself(client, m
     )
 
     assert main.fixture_repo() == "fixtures/demo_repos/ledger"
+
+
+# ---------------------------------------------------------------------------
+# Browsing a repository
+#
+# "Demo repo" was a word until these existed: the screen offered nine names and
+# no way to read a line of what was in them, so nobody watching could tell
+# whether the agent had found the right file.
+# ---------------------------------------------------------------------------
+
+DEMO_SHOPCART = str(main.DEMO_REPO_ROOT / "shopcart")
+
+
+def test_the_tree_of_a_seeded_repo_carries_its_client_complaint(client, live):
+    body = client.get("/repos/tree", params={"repo_path": DEMO_SHOPCART}).json()
+
+    assert body["name"] == "shopcart"
+    assert body["opening_file"] == "shopcart/pricing.py", "opens on the file with the bug"
+    assert "free postage over $50" in body["case"]["complaint"]
+    assert body["case"]["expected_verdict"] == "reproduced_and_fixed"
+    paths = [entry["path"] for entry in body["files"]]
+    assert "shopcart/pricing.py" in paths and "tests/test_pricing.py" in paths
+
+
+def test_a_file_comes_back_as_text(client, live):
+    body = client.get(
+        "/repos/file", params={"repo_path": DEMO_SHOPCART, "path": "shopcart/pricing.py"}
+    ).json()
+
+    assert "def " in body["text"]
+    assert body["lines"] > 5
+    assert body["truncated"] is False
+
+
+def test_browsing_will_not_read_outside_the_allowed_roots(client, live):
+    """The endpoint has no auth; the allow-list is the same one a run is held to."""
+    response = client.get("/repos/tree", params={"repo_path": "/etc"})
+
+    assert response.status_code == 400
+    assert "must be inside" in response.json()["detail"]
+
+
+def test_browsing_will_not_climb_out_of_the_repository(client, live):
+    response = client.get(
+        "/repos/file", params={"repo_path": DEMO_SHOPCART, "path": "../../../.env"}
+    )
+
+    assert response.status_code == 400
+    assert "outside the repository" in response.json()["detail"]
+
+
+def test_a_repo_url_is_cloned_and_named_as_the_person_typed_it(client, live, monkeypatch):
+    """Not as the cache directory: `kennethreitz__records` looks like the wrong repo."""
+    monkeypatch.setattr(main, "fetch_repo", lambda ref: main.DEMO_REPO_ROOT / "shopcart")
+
+    body = client.get("/repos/tree", params={"repo_url": "acme/store"}).json()
+
+    assert body["name"] == "acme/store"
+    assert body["opening_file"] == "shopcart/pricing.py"
+
+
+def test_browsing_a_repository_that_cannot_be_fetched_says_why(client, live, monkeypatch):
+    from repro.sandbox.github import RepoFetchError
+
+    def refuse(ref):
+        raise RepoFetchError("GitHub has no repository acme/nope")
+
+    monkeypatch.setattr(main, "fetch_repo", refuse)
+
+    response = client.get("/repos/tree", params={"repo_url": "acme/nope"})
+
+    assert response.status_code == 400
+    assert "acme/nope" in response.json()["detail"]
+
+
+def test_browsing_needs_a_repository_and_refuses_two(client, live):
+    assert client.get("/repos/tree").status_code == 400
+    both = client.get(
+        "/repos/tree", params={"repo_url": "acme/store", "repo_path": DEMO_SHOPCART}
+    )
+    assert both.status_code == 400
+
+
+def test_config_offers_every_demo_repo_with_the_complaint_written_for_it(client, live):
+    repos = client.get("/config").json()["demo_repos"]
+
+    assert len(repos) >= 8
+    shopcart = next(repo for repo in repos if repo["name"] == "shopcart")
+    assert "free postage over $50" in shopcart["complaint"]
+    assert shopcart["case_id"] == "shopcart-free-shipping"
+    # Three seeded cases are supposed to end with no patch; the picker can say so.
+    assert any(repo["expected_verdict"] == "not_reproduced" for repo in repos)
+
+
+def test_a_repo_with_no_dataset_entry_is_still_offered(client, live, monkeypatch, tmp_path):
+    """It exists and a run against it works; it simply has no complaint to show."""
+    (tmp_path / "orphan").mkdir()
+    monkeypatch.setattr(main, "DEMO_REPO_ROOT", tmp_path)
+
+    repos = client.get("/config").json()["demo_repos"]
+
+    assert [repo["name"] for repo in repos] == ["orphan"]
+    assert repos[0]["complaint"] == ""

@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useOpenFile } from './openFile.js'
 import { composeReply, paragraphsOf } from './reply.js'
 
 /* Red and green must survive video compression and colour-blind viewers, so a
@@ -18,6 +19,25 @@ export function Value({ children }) {
   const empty = children === null || children === undefined || children === ''
   if (empty) return <span className="not-stated">not stated</span>
   return <span>{children}</span>
+}
+
+/* A repo-relative path you can click to read the file it names. The localiser
+   saying "shopcart/pricing.py" is a claim; being one click from the code is
+   what lets anyone watching check it. Falls back to plain text wherever no
+   browser is listening. */
+function FilePath({ path, suffix = '' }) {
+  const openFile = useOpenFile()
+  if (!openFile) return <code className="path">{path}{suffix}</code>
+  return (
+    <button
+      type="button"
+      className="path path-link"
+      title={`Open ${path}`}
+      onClick={() => openFile(path)}
+    >
+      {path}{suffix}
+    </button>
+  )
 }
 
 function Field({ label, children }) {
@@ -149,10 +169,10 @@ function LocaliseCard({ card }) {
         {hypotheses.map((hypothesis, index) => (
           <li key={index} className="hyp">
             <div className="hyp-head">
-              <code className="path">
-                {hypothesis.file_path}
-                {hypothesis.symbol ? `::${hypothesis.symbol}` : ''}
-              </code>
+              <FilePath
+                path={hypothesis.file_path}
+                suffix={hypothesis.symbol ? `::${hypothesis.symbol}` : ''}
+              />
               <span className="conf-pct">{Math.round(hypothesis.confidence * 100)}%</span>
             </div>
             <div className="bar" role="img"
@@ -206,6 +226,9 @@ function ReproCard({ card }) {
                 ? 'the test failed, and the failure is the complaint.'
                 : 'the test passed, so the reported behaviour did not happen. Trying again.'}
             </p>
+            {/* Not a FilePath: the generated test exists only inside the
+                throwaway workspace, which is deleted when the run ends. Its
+                source is right here instead. */}
             <CodeBlock label={data.test_path}>{data.test_source}</CodeBlock>
             <CodeBlock label={`pytest · ${data.passed || 0} passed, ${data.failed || 0} failed, ${data.errors || 0} errors, ${data.duration_s}s`}>
               {data.stdout_tail}
@@ -261,7 +284,7 @@ function FixCard({ card }) {
             <div className="fields">
               <Field label="Files touched">
                 {(data.files_touched || []).map((file) => (
-                  <code key={file} className="path">{file}</code>
+                  <FilePath key={file} path={file} />
                 ))}
               </Field>
               <Field label="Why this fixes it">{data.rationale}</Field>

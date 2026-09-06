@@ -490,3 +490,169 @@ body {
 @media (max-width: 1080px) {
   .cost { position: static; margin: 0 0 18px; text-align: left; }
 }
+
+/* --- right column tabs ----------------------------------------------------- */
+
+.tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+.tab {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 18px;
+  color: var(--ink-3);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.tab:hover { color: var(--ink); }
+.tab-on {
+  color: var(--accent);
+  background: var(--surface);
+  border-color: var(--line);
+}
+.tab-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.2s ease-in-out infinite;
+  vertical-align: middle;
+}
+
+/* --- the repository browser ------------------------------------------------ */
+
+.browser { padding: 0; overflow: hidden; }
+.browser-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* The complaint that was written for a seeded repo. It is half the case: the
+   repo alone says nothing about what the agent is meant to do with it. */
+.seeded {
+  padding: 16px 22px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--line);
+}
+.seeded-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.seeded-quote {
+  margin: 8px 0 10px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+.seeded-actions { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.seeded-truth { font-size: 12.5px; color: var(--ink-3); }
+.seeded-truth code { font-family: var(--mono); font-size: 12px; }
+
+.browser-body { display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 420px; }
+
+.filelist {
+  list-style: none;
+  margin: 0;
+  padding: 8px 0;
+  border-right: 1px solid var(--line);
+  background: #fbfcfd;
+  max-height: 70vh;
+  overflow: auto;
+}
+.fileitem {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  padding: 6px 14px;
+  background: none;
+  border: 0;
+  border-left: 2px solid transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.fileitem:hover:not(:disabled) { background: #f2f5f9; color: var(--ink); }
+.fileitem:disabled { color: #aab4c4; cursor: default; }
+.fileitem-on {
+  background: var(--surface);
+  border-left-color: var(--accent);
+  color: var(--ink);
+  font-weight: 600;
+}
+.filepath { font-family: var(--mono); overflow-wrap: anywhere; }
+.filemeta { display: flex; align-items: baseline; gap: 6px; font-size: 11px; color: var(--ink-3); flex: none; }
+.filetag {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.filepane { min-width: 0; max-height: 70vh; overflow: auto; }
+.filepane .code-label { position: sticky; top: 0; z-index: 1; }
+.filepane .note { padding: 18px 22px; }
+.filepane .pending { padding: 22px; }
+
+/* --- the code viewer ------------------------------------------------------- */
+
+.codeview { overflow-x: auto; }
+.codelines {
+  list-style: none;
+  margin: 0;
+  padding: 10px 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+.codeline { display: flex; gap: 14px; white-space: pre; }
+.codeline:hover { background: #fafbfd; }
+.lineno {
+  flex: none;
+  width: 44px;
+  padding-right: 6px;
+  text-align: right;
+  color: #b3bcc9;
+  user-select: none;
+}
+.linetext { padding-right: 22px; }
+
+.tok-kw { color: #8250df; font-weight: 600; }
+.tok-str { color: #0a7d55; }
+.tok-comment { color: #7b8794; font-style: italic; }
+.tok-num { color: #b45309; }
+.tok-builtin { color: #1f6feb; }
+.tok-defname { color: #1f2933; font-weight: 700; }
+
+/* A path in a card that opens the file it names. Looks like the code it points
+   at, not like a button, until you are on it. */
+.path-link {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  overflow-wrap: anywhere;
+}
+.path-link:hover { text-decoration-color: currentColor; }
+
+@media (max-width: 1100px) {
+  .browser-body { grid-template-columns: 1fr; }
+  .filelist { border-right: 0; border-bottom: 1px solid var(--line); max-height: 220px; }
+}

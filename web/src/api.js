@@ -107,6 +107,44 @@ export function followRun(runId, { onEvent, onDone, onError }) {
   return close
 }
 
+/**
+ * Build the query that names a repository, for the browsing endpoints.
+ *
+ * The API takes `repo_url` OR `repo_path` and refuses both, so this is the one
+ * place that decides which of the two the form is currently describing.
+ */
+export function repoQuery({ source, repoUrl, repoRef, repoPath }) {
+  const params = new URLSearchParams()
+  if (source === 'github') {
+    if (!repoUrl?.trim()) return null
+    params.set('repo_url', repoUrl.trim())
+    if (repoRef?.trim()) params.set('repo_ref', repoRef.trim())
+  } else {
+    if (!repoPath) return null
+    params.set('repo_path', repoPath)
+  }
+  return params
+}
+
+/** Every readable file in the repository, plus which one to open first. */
+export async function fetchTree(target) {
+  const params = repoQuery(target)
+  if (!params) return null
+  const response = await fetch(`${API_BASE}/repos/tree?${params}`)
+  if (!response.ok) throw new Error(await detail(response))
+  return response.json()
+}
+
+/** One file's text. `path` is repo-relative; the backend checks containment. */
+export async function fetchFile(target, path) {
+  const params = repoQuery(target)
+  if (!params) return null
+  params.set('path', path)
+  const response = await fetch(`${API_BASE}/repos/file?${params}`)
+  if (!response.ok) throw new Error(await detail(response))
+  return response.json()
+}
+
 export async function fetchRecord(runId) {
   const response = await fetch(`${API_BASE}/runs/${runId}`)
   if (response.status === 202) return null // still running

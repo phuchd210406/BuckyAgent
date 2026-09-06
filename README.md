@@ -69,6 +69,23 @@ plainly when there is no credential and it is about to replay instead.
 Private repositories need `GITHUB_TOKEN` set on the backend. The token is used
 for the clone and then wiped from the checkout's git config.
 
+### Reading the repository before you run on it
+
+The **Code** tab shows the checkout the agent is about to search — the file
+list, the code with line numbers, and the existing test suite marked as such.
+It works the same for a pasted GitHub repository (cloned here, and the run
+reuses that clone) and for a seeded one.
+
+For a seeded repository it also shows **the complaint written for it**, read
+from `eval/dataset.yaml` so the screen cannot drift from what the eval scores,
+along with the ground truth: which file holds the bug, or that there is nothing
+to patch and the agent is supposed to say so. Three of the nine cases are that
+kind. One click puts the complaint in the box.
+
+During a run, every file path the agent names is a link into that panel: the
+localiser saying `shopcart/pricing.py` is a claim, and being one click from the
+code is what lets anyone watching check it.
+
 ## Layout
 
 | Path | Purpose |
@@ -82,6 +99,8 @@ for the clone and then wiped from the checkout's git config.
 | `src/repro/llm/fake.py` | Record/replay + scripted clients. Free, deterministic tests |
 | `src/repro/clients.py` | Which provider a run uses, and whether one is available at all |
 | `src/repro/sandbox/github.py` | Clone a real repository: bounded, cached, token-aware |
+| `src/repro/sandbox/preview.py` | Read a repository for a human: listed, bounded, contained |
+| `src/repro/demo_cases.py` | The seeded complaints, read from the golden dataset |
 | `src/repro/sandbox/deps.py` | A per-run virtualenv, so a real project's tests can import |
 | `src/repro/sandbox/` | Disposable workspace, pytest runner, patch apply/revert |
 | `src/repro/retrieval/` | Local code search. No vector DB, by design |

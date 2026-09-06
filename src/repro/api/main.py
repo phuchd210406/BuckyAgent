@@ -37,11 +37,12 @@ from sse_starlette.sse import EventSourceResponse
 
 from repro.clients import credential_for, llm_for, resolve_provider
 from repro.contracts import MAX_RUN_USD, ClientReport, RunRecord, StreamEvent
+from repro.demo_cases import case_for
 from repro.graph import events
 from repro.graph.build import enforce_invariants
 from repro.graph.build import run as run_graph
 from repro.llm.base import SchemaValidationError
-from repro.sandbox import deps
+from repro.sandbox import deps, preview
 from repro.sandbox.github import (
     DEFAULT_CACHE_ROOT,
     RepoFetchError,
@@ -114,14 +115,36 @@ def allowed_roots() -> list[Path]:
 
 
 def demo_repos() -> list[dict]:
-    """Every seeded repo in the fixtures directory, newest listing on each call."""
+    """Every seeded repo on disk, each with the complaint written for it.
+
+    Listed from the FILESYSTEM and annotated from the dataset, in that order: a
+    repository with no dataset entry is still offered (it exists, you can run
+    against it), and a dataset entry whose repository is missing is not, because
+    choosing it would fail at the workspace copy.
+    """
     if not DEMO_REPO_ROOT.is_dir():
         return []
-    return [
-        {"path": str(path), "name": path.name}
-        for path in sorted(DEMO_REPO_ROOT.iterdir())
-        if path.is_dir()
-    ]
+
+    listed = []
+    for path in sorted(DEMO_REPO_ROOT.iterdir()):
+        if not path.is_dir():
+            continue
+        case = case_for(path)
+        if case is not None:
+            listed.append(case.as_dict())
+        else:
+            listed.append(
+                {
+                    "case_id": "",
+                    "path": str(path),
+                    "name": path.name,
+                    "complaint": "",
+                    "expected_verdict": "",
+                    "expected_files": [],
+                    "notes": "",
+                }
+            )
+    return listed
 
 
 #: run_id -> the run. In memory on purpose: runs are minutes long, not days,
@@ -509,6 +532,93 @@ def config() -> dict:
         "max_run_usd": MAX_RUN_USD,
         "demo_repos": demo_repos(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Browsing a repository
+#
+# A demo nobody can read is a demo of nothing: the screen used to offer nine
+# repository names and no way to see a line of what was in them. These two
+# routes serve the same repository the run will use -- for a GitHub URL that
+# means cloning it here, which is not a detour, because the clone is cached and
+# the run about to be started reuses it.
+# ---------------------------------------------------------------------------
+
+
+def _repo_root(
+    repo_path: str | None, repo_url: str | None, repo_ref: str | None
+) -> tuple[Path, str]:
+    """(directory to browse, what to call it), fetching it first when it is a URL.
+
+    The name is carried separately because a clone lives in a cache directory
+    called `owner__repo`, and showing that to a person who typed
+    `github.com/owner/repo` looks like we fetched something else.
+    """
+    if repo_url and repo_path:
+        raise HTTPException(status_code=400, detail="pass repo_url or repo_path, not both")
+
+    if repo_url:
+        try:
+            ref = parse_repo_ref(repo_url)
+            if repo_ref:
+                ref = RepoRef(owner=ref.owner, repo=ref.repo, ref=repo_ref.strip())
+            return Path(fetch_repo(ref)), str(ref)
+        except RepoFetchError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not repo_path:
+        raise HTTPException(
+            status_code=400, detail="name a repository: pass repo_url or repo_path"
+        )
+    check_repo_path(repo_path)  # the same allow-list a run is held to
+    resolved = Path(repo_path).expanduser().resolve()
+    return resolved, resolved.name
+
+
+@app.get("/repos/tree")
+async def repo_tree(
+    repo_path: Optional[str] = None,
+    repo_url: Optional[str] = None,
+    repo_ref: Optional[str] = None,
+) -> dict:
+    """Every readable file in the repository, and which one to open first.
+
+    Cloning can take a while on a big repository, so it happens on a worker
+    thread: this route is the first thing the page asks for after a URL is
+    typed, and blocking the event loop on it would stall every other request.
+    """
+    root, name = await asyncio.to_thread(_repo_root, repo_path, repo_url, repo_ref)
+    try:
+        files, truncated = await asyncio.to_thread(preview.tree, root)
+    except preview.PreviewError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    case = case_for(root)
+    return {
+        "repo_path": str(root),
+        "name": name,
+        "files": [entry.as_dict() for entry in files],
+        "truncated": truncated,
+        "opening_file": preview.opening_file(files),
+        # Present only for a seeded repo: the complaint written for it, so the
+        # panel can offer it rather than making someone invent one.
+        "case": case.as_dict() if case else None,
+    }
+
+
+@app.get("/repos/file")
+async def repo_file(
+    path: str,
+    repo_path: Optional[str] = None,
+    repo_url: Optional[str] = None,
+    repo_ref: Optional[str] = None,
+) -> dict:
+    """One file's text. `path` is repo-relative and is checked for containment."""
+    root, _ = await asyncio.to_thread(_repo_root, repo_path, repo_url, repo_ref)
+    try:
+        return await asyncio.to_thread(preview.read, root, path)
+    except preview.PreviewError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/runs", status_code=201, response_model=RunAccepted)

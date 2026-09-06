@@ -32,6 +32,25 @@ Open http://localhost:5173 and press **Run**. Vite proxies `/runs` and
 CORS. A mock run takes ~33 seconds, which is deliberate: it is the pacing of a real
 run.
 
+## The two tabs
+
+**Code** is the landing view, and it is the answer to "how is this a demo if I
+cannot see the code?". It lists the repository — the pasted GitHub one after
+cloning it, or a seeded one straight off disk — and shows any text file in it
+with line numbers. For a seeded repository it also shows the client complaint
+written for that case, its expected verdict, and which file holds the bug, all
+read live from `eval/dataset.yaml`.
+
+**Run** is the timeline. A file path in any card opens that file in the Code
+tab, through `openFile.js` — a context rather than a prop threaded through three
+components that otherwise have no reason to know the browser exists. The
+generated repro test is deliberately NOT a link: it only ever existed inside the
+throwaway workspace, and its source is printed in the card instead.
+
+Syntax highlighting is ~60 lines in `CodeView.jsx`, not a dependency. It emits
+spans and never HTML — the text comes out of somebody else's repository, and the
+one thing that panel must never do is let a file decide what the page renders.
+
 ## What the screen has to get right
 
 * **A failed repro attempt stays on screen, with the retry below it.** That

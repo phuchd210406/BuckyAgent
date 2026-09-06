@@ -11,6 +11,7 @@ export default defineConfig({
       '/runs': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/healthz': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/config': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/repos': { target: 'http://127.0.0.1:8000', changeOrigin: true },
     },
   },
 })
