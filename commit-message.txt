@@ -1,17 +1,26 @@
-feat(sandbox): add FakeWorkspace and scripted runner for graph testing
+docs(tasks): add handoff prompt for Engineer A's intake clarify-gate fix
 
-Create src/repro/sandbox/fake.py so Engineer A can simulate sandbox
-outcomes without running real tests, matching Workspace's real
-signatures exactly.
+Add tasks/prompt.md — a pasteable prompt for Engineer A's Claude Code
+session, generated from findings during C4/C5 work.
 
-- FakeWorkspace and a scripted runner that returns a queue of prepared
-  ExecutionResult objects
-- Convenience constructors: green_result(), red_result(failed=1),
-  timeout_result(), import_error_result()
+Summarises the bug: route_after_intake sends a run to clarify whenever
+facts.missing holds a single entry, and clarify goes straight to END,
+so the flagship shopcart case never reaches the localiser. Backed by
+evidence from three real Bedrock recordings (see
+notes/2026-09-06-intake-clarify-gate.md), where Haiku always returned
+a non-empty missing — including fields it had already filled and field
+names not present in ReportFacts at all.
 
-Add a test using inspect.signature that asserts FakeWorkspace and
-Workspace expose the same public method names and signatures. If the
-two ever drift, this test breaks the build instead of letting
-Engineer A's suite silently lie about the real system.
+Prompt instructs Engineer A to:
+- Gate on a CRITICAL_FACTS set in build.py rather than "any missing"
+- Leave the SYSTEM_PROMPT constants in src/repro/agents/* untouched
+  (Engineer C owns them; cassette keys are pinned to their exact text)
+- Update tests/test_routers.py for the new routing behavior, and check
+  tests/test_graph.py for end-to-end cases that assume the old gate
+- Run `make test` and `make lint`, and confirm the only remaining
+  failure is the expected replay-fidelity mismatch from the prompt
+  change, not a new regression
 
-Unblocks Engineer A's graph test suite — post in team channel once merged.
+Left uncommitted pending a call on whether ad hoc handoff prompts
+belong alongside the per-engineer briefs in tasks/, or should stay
+paste-and-discard.
