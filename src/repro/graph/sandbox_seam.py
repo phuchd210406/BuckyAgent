@@ -1,0 +1,122 @@
+"""The seam between the nodes and everything that touches reality. OWNER: Engineer A.
+
+Engineer B owns `repro.sandbox.*`; Engineer C owns `repro.retrieval.*`. Both are
+NotImplementedError today and land at hour 16. The nodes therefore depend on the
+narrow surface below rather than on those modules directly, which is what lets
+the whole graph be driven by a canned stub, in CI, for zero tokens.
+
+The surface is ARCHITECTURE.md's allow-list and nothing else: read (search) a
+file, write a file under tests/, run pytest, apply a unified diff. There is no
+shell, no install, no network -- if it is not a method here, the agent cannot
+do it.
+"""
+from __future__ import annotations
+
+from typing import Protocol
+
+from repro.contracts import (
+    SANDBOX_TIMEOUT_S,
+    ExecutionResult,
+    Hypothesis,
+    Patch,
+    TestArtifact,
+)
+from repro.retrieval.index import rank_candidates as _rank_candidates
+from repro.retrieval.index import search as _search
+from repro.sandbox.patcher import apply_patch as _apply_patch
+from repro.sandbox.patcher import revert_patch as _revert_patch
+from repro.sandbox.runner import run_pytest as _run_pytest
+from repro.sandbox.workspace import Workspace
+
+Hit = tuple[str, str, float]
+
+
+class Sandbox(Protocol):
+    def search(self, query: str, k: int = 8) -> list[Hit]: ...
+
+    def rank_candidates(self, hits: list[Hit], k: int) -> list[Hypothesis]: ...
+
+    def write_test(self, test: TestArtifact) -> None: ...
+
+    def run_test(self, test_path: str) -> ExecutionResult: ...
+
+    def run_suite(self) -> ExecutionResult: ...
+
+    def apply_patch(self, patch: Patch) -> tuple[bool, str]: ...
+
+    def revert_patch(self, patch: Patch) -> None: ...
+
+
+class WorkspaceSandbox:
+    """The real thing: delegates to Engineer B's and Engineer C's functions.
+
+    Every call below is written against the signature as published; the bodies
+    raise NotImplementedError until hour 16, which is expected and is exactly
+    why nothing else in the graph imports them.
+    """
+
+    def __init__(self, ws: Workspace, timeout_s: int = SANDBOX_TIMEOUT_S) -> None:
+        self.ws = ws
+        self.timeout_s = timeout_s
+
+    def search(self, query: str, k: int = 8) -> list[Hit]:
+        return _search(self.ws, query, k=k)
+
+    def rank_candidates(self, hits: list[Hit], k: int) -> list[Hypothesis]:
+        return _rank_candidates(hits, k)
+
+    def write_test(self, test: TestArtifact) -> None:
+        self.ws.write_file(test.path, test.source)
+
+    def run_test(self, test_path: str) -> ExecutionResult:
+        return _run_pytest(self.ws, target=test_path, timeout_s=self.timeout_s)
+
+    def run_suite(self) -> ExecutionResult:
+        return _run_pytest(self.ws, target=None, timeout_s=self.timeout_s)
+
+    def apply_patch(self, patch: Patch) -> tuple[bool, str]:
+        return _apply_patch(self.ws, patch)
+
+    def revert_patch(self, patch: Patch) -> None:
+        _revert_patch(self.ws, patch)
+
+
+class StubSandbox:
+    """Canned green results, no filesystem. WIRING AND TESTS ONLY -- it runs nothing.
+
+    build_graph() falls back to this so the graph can be compiled and driven
+    before hour 16. run() (task A4) passes a WorkspaceSandbox instead.
+    """
+
+    _GREEN = ExecutionResult(exit_code=0, stdout_tail="", stderr_tail="", duration_s=0.0)
+
+    def search(self, query: str, k: int = 8) -> list[Hit]:
+        return []
+
+    def rank_candidates(self, hits: list[Hit], k: int) -> list[Hypothesis]:
+        return []
+
+    def write_test(self, test: TestArtifact) -> None:
+        return None
+
+    def run_test(self, test_path: str) -> ExecutionResult:
+        return self._GREEN
+
+    def run_suite(self) -> ExecutionResult:
+        return self._GREEN
+
+    def apply_patch(self, patch: Patch) -> tuple[bool, str]:
+        return True, "stub sandbox applied nothing"
+
+    def revert_patch(self, patch: Patch) -> None:
+        return None
+
+
+def require_sandbox(sandbox: Sandbox | None) -> Sandbox:
+    """A node that touches reality must be handed the thing it touches it with."""
+    if sandbox is None:
+        raise RuntimeError(
+            "no sandbox was injected: build_graph(llm, sandbox=...) supplies one to every "
+            "node that needs it. Calling this node directly? Pass sandbox=StubSandbox()."
+        )
+    return sandbox

@@ -20,6 +20,7 @@ from repro.contracts import (
     Patch,
     ReportFacts,
     ReproAttempt,
+    RunRecord,
     TokenUsage,
     Verdict,
 )
@@ -39,27 +40,44 @@ IMPORT_ERROR = ExecutionResult(
 
 
 class StubSandbox:
-    """Canned results, and a tally of what the graph asked it to do."""
+    """Canned results, and a tally of what the graph asked it to do.
 
-    def __init__(self, test_result=GREEN, suite_result=GREEN, applies=True):
-        self.test_result = test_result
+    `test_result` may be a list: one result per run_test call, the last one
+    repeating. That is how the happy path goes red (repro) then green (fix).
+    """
+
+    def __init__(self, test_result=GREEN, suite_result=GREEN, applies=True, candidates=()):
+        self.test_results = list(test_result) if isinstance(test_result, list) else [test_result]
         self.suite_result = suite_result
         self.applies = applies
+        self.candidates = list(candidates)
         self.writes: list[str] = []
+        self.searches: list[str] = []
         self.test_runs = 0
         self.suite_runs = 0
         self.patches: list[Patch] = []
+        self.reverts: list[Patch] = []
+
+    def search(self, query: str, k: int = 8):
+        self.searches.append(query)
+        return []
+
+    def rank_candidates(self, hits, k: int):
+        return self.candidates[:k]
 
     def write_test(self, test) -> None:
         self.writes.append(test.path)
 
     def run_test(self, test_path: str) -> ExecutionResult:
         self.test_runs += 1
-        return self.test_result
+        return self.test_results.pop(0) if len(self.test_results) > 1 else self.test_results[0]
 
     def apply_patch(self, patch: Patch) -> tuple[bool, str]:
         self.patches.append(patch)
         return self.applies, "" if self.applies else "diff did not apply"
+
+    def revert_patch(self, patch: Patch) -> None:
+        self.reverts.append(patch)
 
     def run_suite(self) -> ExecutionResult:
         self.suite_runs += 1
@@ -214,7 +232,7 @@ def test_a_green_target_test_with_a_broken_suite_is_not_accepted():
 # --- 3. a node that lies about the counters ----------------------------------
 
 
-def _counter_resetting_repro_node(state, llm, sandbox):
+def _counter_resetting_repro_node(state, llm, *, sandbox=None):
     """The adversary: every attempt, it reports that it has made none."""
     return {
         "repro_count": 0,
@@ -232,7 +250,7 @@ def _counter_resetting_repro_node(state, llm, sandbox):
 
 
 def test_a_node_cannot_reset_a_counter_to_buy_itself_more_loops(monkeypatch):
-    monkeypatch.setattr(build_mod, "_repro_node", _counter_resetting_repro_node)
+    monkeypatch.setattr(build_mod, "repro_agent_node", _counter_resetting_repro_node)
     sandbox = StubSandbox(test_result=GREEN)
     llm = ScriptedLLM([facts(), hypothesis(), handover()])
 
@@ -246,7 +264,7 @@ def test_a_node_cannot_reset_a_counter_to_buy_itself_more_loops(monkeypatch):
 
 
 def test_a_node_cannot_under_report_its_usage(monkeypatch):
-    monkeypatch.setattr(build_mod, "_repro_node", _counter_resetting_repro_node)
+    monkeypatch.setattr(build_mod, "repro_agent_node", _counter_resetting_repro_node)
     llm = ScriptedLLM([facts(), hypothesis(), handover()])
 
     out = invoke(llm, StubSandbox(test_result=GREEN))
@@ -336,3 +354,48 @@ def test_a_patch_that_will_not_apply_is_a_failed_attempt_not_a_crash():
     assert all(f.target_test.errors == 1 for f in out["fix_attempts"])
     assert sandbox.test_runs == 1  # the repro run only; no patch ever landed
     assert out["verdict"] == Verdict.REPRODUCED_NOT_FIXED
+
+
+# --- the whole thing, once, working -------------------------------------------
+
+
+def _record(out) -> RunRecord:
+    """Terminal state -> RunRecord. Task A4 replaces this with the real one."""
+    return RunRecord(
+        run_id=out["report"].run_id,
+        report=out["report"],
+        facts=out.get("facts"),
+        questions=out.get("questions", []),
+        hypotheses=out.get("hypotheses", []),
+        repro_attempts=out.get("repro_attempts", []),
+        fix_attempts=out.get("fix_attempts", []),
+        verdict=out["verdict"],
+        handover=out.get("handover"),
+        usage=out.get("usage") or TokenUsage(),
+    )
+
+
+def test_end_to_end_happy_path_produces_a_sound_record():
+    # Red once (that is the reproduction), green when re-run after the patch.
+    sandbox = StubSandbox(test_result=[RED, GREEN], suite_result=GREEN)
+    llm = ScriptedLLM([facts(), hypothesis(), generated_test(), patch(), handover()])
+
+    out = invoke(llm, sandbox)
+
+    assert [a.reproduced for a in out["repro_attempts"]] == [True]
+    assert [f.accepted for f in out["fix_attempts"]] == [True]
+    assert out["verdict"] == Verdict.REPRODUCED_AND_FIXED
+    assert out["handover"].client_reply
+    assert len(out["hypotheses"]) == 1
+    assert sandbox.writes == ["tests/test_repro_0.py"]
+    assert sandbox.test_runs == 2  # once to reproduce, once to verify the patch
+    assert sandbox.suite_runs == 1
+    assert sandbox.reverts == []  # nothing to undo: the patch was accepted
+    assert out["repro_count"] == 1 and out["fix_count"] == 1
+    # intake, localise, repro, fix, report. Five, on the happy path.
+    assert len(llm.calls) == 5
+    assert llm.replies == []
+
+    record = _record(out)
+    assert record.check_invariants() == []
+    assert record.usage.calls == 5
