@@ -17,12 +17,40 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
+from pathlib import Path
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp  # type: ignore
 from pydantic import ValidationError
 
-from repro import clients
-from repro.contracts import (
+# `repro` lives under src/, and this file is run as a SCRIPT, not imported as a
+# module of an installed package -- so nothing puts src/ on the path for it.
+# Locally that is covered by PYTHONPATH=src; deployed it is not, because the
+# runtime is created from `source_path` (the repo root) and requirements.txt
+# does not install this project.
+#
+# When the import fails there, it does not look like an import failure: the
+# process dies before it binds :8080 and AgentCore can only report "Runtime
+# initialization time exceeded. Please make sure that initialization completes
+# in 30s", which sends you looking at startup time instead of at sys.path.
+#
+# TWO directories, and the second one is the non-obvious half. Direct Code Deploy
+# unpacks the dependency layer FLAT into the deployment root -- /var/task holds
+# `bedrock_agentcore/`, `anyio/`, `pydantic/` and the rest beside `src/`. That
+# root is on sys.path automatically only when the entrypoint sits in it. Ours is
+# three levels down, so sys.path[0] is .../src/repro/agentcore and /var/task is
+# never added: every third-party import fails, starting with the AgentCore SDK
+# on the line below, and the runtime dies before it binds.
+#
+# Both are idempotent, so this is a no-op wherever PYTHONPATH or an install has
+# already done the job.
+_HERE = Path(__file__).resolve()
+for _path in (str(_HERE.parents[2]), str(_HERE.parents[3])):  # .../src, then the root
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
+
+from repro import clients  # noqa: E402  (must follow the sys.path bootstrap above)
+from repro.contracts import (  # noqa: E402
     MAX_REPRO_ATTEMPTS,
     ClientReport,
     Handover,
@@ -30,9 +58,9 @@ from repro.contracts import (
     ReportFacts,
     TestArtifact,
 )
-from repro.graph.build import run
-from repro.graph.sandbox_seam import Sandbox, StubSandbox
-from repro.llm.base import LLMClient
+from repro.graph.build import run  # noqa: E402
+from repro.graph.sandbox_seam import Sandbox, StubSandbox  # noqa: E402
+from repro.llm.base import LLMClient  # noqa: E402
 
 LOG = logging.getLogger("repro.agentcore")
 

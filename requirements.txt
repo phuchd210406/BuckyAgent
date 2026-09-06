@@ -10,6 +10,15 @@ python-dotenv>=1.0
 pyyaml>=6.0
 
 # Deploy (only needed for the AgentCore recording)
+#
+# bedrock-agentcore is IMPORTED by src/repro/agentcore/agent.py, so it ships
+# inside the deployed image. The starter toolkit is not: it is the `agentcore`
+# CLI you run from a laptop once, for configure/launch/destroy, and nothing in
+# this repo imports it.
+#
+# The starter toolkit itself lives in requirements-deploy.txt, NOT here: Direct
+# Code Deploy installs this file into the runtime, which has 30s to initialise,
+# and the toolkit drags in 32 packages the runtime never imports.
 bedrock-agentcore>=0.1.0 ; python_version >= "3.10"
 
 # Dev

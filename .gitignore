@@ -7,6 +7,7 @@ __pycache__/
 /tmp/
 node_modules/
 web/dist/
+web/node_modules/
 runs/
 .bedrock_agentcore.yaml
 # FakeLLM writes unmatched prompts here to be diffed. Debug output, not cassettes.

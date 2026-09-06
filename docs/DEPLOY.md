@@ -124,10 +124,7 @@ billable build.
 pip install 'bedrock-agentcore-starter-toolkit==0.3.12'   # also pinned in requirements.txt
 cd "$(git rev-parse --show-toplevel)"      # the build context. Not src/repro/agentcore.
 
-agentcore configure \
-  --entrypoint src/repro/agentcore/agent.py \
-  --requirements-file requirements.txt \
-  --region <the region check_bedrock chose>
+agentcore configure --entrypoint src/repro/agentcore/agent.py --requirements-file requirements.txt --region us-east-1
 ```
 
 It is interactive. The answer that matters is the first one:

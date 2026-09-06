@@ -1,0 +1,16 @@
+# The `agentcore` CLI. Laptop-only, install it separately:
+#
+#     pip install -r requirements-deploy.txt
+#
+# NOT in requirements.txt, and this is not tidiness. Direct Code Deploy uploads
+# `source_path` and installs the requirements.txt it finds there INTO THE
+# RUNTIME, and the runtime has 30 seconds to finish initialising and bind its
+# port. This one package pulls in 32 more (autopep8, prance, typer, rich,
+# questionary, ruamel-yaml and friends), taking the install from 61 packages to
+# 93 — none of which anything in this repo imports. On the configured
+# linux/arm64 platform some of those have no wheel and get built from source.
+#
+# Pinned exactly because AWS has deprecated it ("The Starter Toolkit CLI is no
+# longer supported"), and a deprecated package can change under you or be
+# yanked. It has one job on one day.
+bedrock-agentcore-starter-toolkit==0.3.12 ; python_version >= "3.10"
