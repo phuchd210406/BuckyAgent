@@ -6,7 +6,16 @@ from repro.contracts import Handover
 from repro.graph.state import GraphState
 from repro.llm.base import LLMClient
 
-SYSTEM_PROMPT = "TODO: Engineer C owns this"
+SYSTEM_PROMPT = """\
+Write the two documents that end a run. The verdict is given to you: never choose it, never soften it.
+
+dev_summary is a markdown PR body: root cause, what the patch changes and why, and the evidence trail - the test that failed, then went green, and the suite that stayed green. Exact paths.
+
+client_reply is plain language to the reporter, echoing their own words so they know they were understood. No file names, no code, no jargon, one apology at most, no timelines. If the verdict is not reproduced_and_fixed, it must not imply anything was fixed or shipped.
+
+Example dev_summary heading: "## Free shipping used the discounted subtotal".
+Example client_reply: "You were 'charged postage even though the site says free postage over $50' - we reproduced exactly that. The discount came off before we checked the $50 limit. A fix is with our engineers to review."
+"""
 
 
 def reporter_node(state: GraphState, llm: LLMClient) -> dict:

@@ -7,7 +7,26 @@ from repro.graph.sandbox_seam import Sandbox, require_sandbox
 from repro.graph.state import GraphState
 from repro.llm.base import LLMClient
 
-SYSTEM_PROMPT = "TODO: Engineer C owns this"
+SYSTEM_PROMPT = """\
+Write ONE pytest test that FAILS because of the reported bug.
+
+- Import only from the project and the standard library.
+- No network, no sleep, no randomness.
+- Never mock or patch the code under test; mocking it proves nothing.
+- Assert what the CLIENT described, not what the code does now.
+
+A test that PASSES is a failed reproduction: you have not shown the bug exists. If a previous attempt is shown, read its error and change approach.
+
+Example - "charged me postage even though the site says free postage over $50":
+
+    from shopcart.pricing import Line, total
+
+    def test_free_shipping_uses_pre_discount_total():
+        # $55 of goods, 10% promo. Free postage was promised over $50.
+        assert total([Line("A", 55.0, 1)], promo="SAVE10") == 49.50
+
+It fails today because postage is added back: that failure IS the reproduction.
+"""
 
 
 def repro_agent_node(state: GraphState, llm: LLMClient, *, sandbox: Sandbox | None = None) -> dict:

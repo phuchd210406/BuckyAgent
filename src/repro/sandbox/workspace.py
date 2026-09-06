@@ -22,6 +22,26 @@ KEEP_ENV_VAR = "REPRO_KEEP_WORKSPACE"
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 
+def truncate_head(chunk: str, max_chars: int, size_bytes: int) -> str:
+    """Bound ``chunk`` to ``max_chars``, keeping the head and marking the cut.
+
+    Module-level so ``sandbox/fake.py`` can call the SAME implementation. A fake
+    that truncated even slightly differently would let Engineer A's tests assert
+    behaviour the real Workspace does not have.
+    """
+    if len(chunk) <= max_chars:
+        return chunk
+
+    marker = _TRUNCATION_MARKER.format(size=size_bytes, kept=max_chars)
+    kept = max_chars - len(marker)
+    if kept <= 0:
+        # Degenerate max_chars: still bounded, still marked.
+        return marker[:max_chars]
+    marker = _TRUNCATION_MARKER.format(size=size_bytes, kept=kept)
+    kept = max(0, max_chars - len(marker))
+    return (chunk[:kept] + marker)[:max_chars]
+
+
 def keep_workspaces() -> bool:
     """True when the operator asked for workspaces to survive ``close()``.
 
@@ -154,18 +174,7 @@ class Workspace:
             # the file was too long, without reading the whole thing.
             chunk = fh.read(max_chars + 1)
 
-        if len(chunk) <= max_chars:
-            return chunk
-
-        size = target.stat().st_size
-        marker = _TRUNCATION_MARKER.format(size=size, kept=max_chars)
-        kept = max_chars - len(marker)
-        if kept <= 0:
-            # Degenerate max_chars: still bounded, still marked.
-            return marker[:max_chars]
-        marker = _TRUNCATION_MARKER.format(size=size, kept=kept)
-        kept = max(0, max_chars - len(marker))
-        return (chunk[:kept] + marker)[:max_chars]
+        return truncate_head(chunk, max_chars, target.stat().st_size)
 
     # --- teardown -----------------------------------------------------------
     def close(self) -> None:

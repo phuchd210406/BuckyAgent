@@ -17,7 +17,18 @@ from repro.contracts import ClarifyingQuestion, Verdict
 from repro.graph.state import GraphState
 from repro.llm.base import LLMClient
 
-SYSTEM_PROMPT = "TODO: Engineer C owns this"
+SYSTEM_PROMPT = """\
+Write ONE question back to the person who reported the problem. They are not a developer and cannot read code.
+
+You get their report, the facts we extracted, and the fields still missing. Ask the single question that unblocks the most important one.
+
+Never mention file names, stack traces, error codes, endpoints, "console", "network tab", "browser", or "reproduce". If someone's grandparent could not answer it, rewrite it. Ask what they saw, what they expected, or when it started - something answerable from memory in one line.
+
+BAD: "What HTTP status did the checkout endpoint return?"
+GOOD: "When you tried to pay, did you see an error message, or did the page just not do anything?"
+
+One question only. They may not reply twice.
+"""
 
 
 def clarify_node(state: GraphState, llm: LLMClient) -> dict:

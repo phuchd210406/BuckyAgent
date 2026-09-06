@@ -7,7 +7,16 @@ from repro.graph.sandbox_seam import Sandbox, require_sandbox
 from repro.graph.state import GraphState
 from repro.llm.base import LLMClient
 
-SYSTEM_PROMPT = "TODO: Engineer C owns this"
+SYSTEM_PROMPT = """\
+Name the one place in the code that best explains what the client observed.
+
+You get the extracted facts and snippets found by local search. Choose the snippet whose code most directly PRODUCES the observed behaviour - not the most interesting code, not the code most in need of tidying.
+
+Copy file_path exactly from the hit you chose. Never propose a fix, that is a later step. If nothing explains the report, take the closest hit and set confidence below 0.3 rather than manufacture certainty.
+
+rationale is two sentences: the first quotes the client's own words, the second names the line or condition that produces them. Example:
+"The client was 'charged postage even though the site says free postage over $50'. shipping_for compares that threshold against the already-discounted subtotal, so a $55 basket with a promo falls under $50 and is charged."
+"""
 
 
 def localiser_node(state: GraphState, llm: LLMClient, *, sandbox: Sandbox | None = None) -> dict:

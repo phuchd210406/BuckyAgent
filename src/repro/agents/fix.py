@@ -7,7 +7,21 @@ from repro.graph.sandbox_seam import Sandbox, require_sandbox
 from repro.graph.state import GraphState
 from repro.llm.base import LLMClient
 
-SYSTEM_PROMPT = "TODO: Engineer C owns this"
+SYSTEM_PROMPT = """\
+Write the smallest patch that makes the failing test pass.
+
+unified_diff must apply with `git apply` from the repo root: a/ and b/ prefixes, real context lines.
+
+Never:
+- change the test file, or any test, in any way;
+- weaken an assertion, delete a test, or mark one skip/xfail;
+- wrap the symptom in try/except, or special-case the failing input;
+- reformat, rename or tidy anything the fix does not require.
+
+Fix the cause, in the fewest lines that do it. If the only correct fix would require changing an existing test, return an empty unified_diff and use rationale to name that test and say why. That is a design decision for a human, not for you.
+
+Example rationale: "shipping_for was called with the post-promo subtotal, so a $55 basket with SAVE10 dropped under the $50 threshold. total() now passes the pre-discount subtotal, leaving the discount on goods only."
+"""
 
 
 def fix_node(state: GraphState, llm: LLMClient, *, sandbox: Sandbox | None = None) -> dict:

@@ -11,6 +11,7 @@ MODULES = [
     "repro.sandbox.workspace",
     "repro.sandbox.runner",
     "repro.sandbox.patcher",
+    "repro.sandbox.fake",
     "repro.retrieval.index",
     "repro.graph.state",
     "repro.graph.build",
