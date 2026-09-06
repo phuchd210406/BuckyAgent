@@ -8,12 +8,19 @@ still pass with the cap set to 300.
 """
 from __future__ import annotations
 
+import logging
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+import pytest
+
 from repro.contracts import (
     MAX_FIX_ATTEMPTS,
     MAX_REPRO_ATTEMPTS,
     MAX_TOTAL_LLM_CALLS,
     ClientReport,
     ExecutionResult,
+    FixAttempt,
     Handover,
     Hypothesis,
     LLMResponse,
@@ -26,8 +33,9 @@ from repro.contracts import (
 )
 from repro.contracts import TestArtifact as GeneratedTest
 from repro.graph import build as build_mod
-from repro.graph.build import budget_exhausted, build_graph
+from repro.graph.build import assemble_run_record, budget_exhausted, build_graph, run
 from repro.llm.fake import ScriptedLLM
+from repro.settings import Settings
 
 GREEN = ExecutionResult(exit_code=0, stdout_tail="", stderr_tail="", duration_s=0.1)
 RED = ExecutionResult(exit_code=1, stdout_tail="1 failed", stderr_tail="", duration_s=0.1, failed=1)
@@ -399,3 +407,169 @@ def test_end_to_end_happy_path_produces_a_sound_record():
     record = _record(out)
     assert record.check_invariants() == []
     assert record.usage.calls == 5
+
+
+# --- run(): the single public entry point -------------------------------------
+
+
+class FakeWorkspace:
+    """Stands in for Engineer B's Workspace, which does not exist until hour 16."""
+
+    def __init__(self, source_repo="/tmp/shopcart", root="/tmp/repro-workspaces/ws"):
+        self.source_repo = source_repo
+        self.root = Path(root)
+        self.closes = 0
+
+    @property
+    def path(self) -> Path:
+        return self.root
+
+    def close(self) -> None:
+        self.closes += 1
+
+
+def happy_path_llm() -> ScriptedLLM:
+    return ScriptedLLM([facts(), hypothesis(), generated_test(), patch(), handover()])
+
+
+def test_run_returns_the_assembled_record_on_the_happy_path():
+    record = run(report(), happy_path_llm(), sandbox=StubSandbox(test_result=[RED, GREEN]))
+
+    assert record.verdict == Verdict.REPRODUCED_AND_FIXED
+    assert record.check_invariants() == []
+    assert record.run_id == "r1"
+    assert record.contract_version == "1.0.0"
+    assert len(record.repro_attempts) == 1 and len(record.fix_attempts) == 1
+    assert record.fix_attempts[0].patch.unified_diff  # a real patch, on a sound run
+    assert record.handover is not None
+    assert record.usage.calls == 5
+    assert record.wall_clock_s >= 0.0
+
+
+def _lying_reporter_node(state, llm):
+    """Claims a verified fix on a run that never reproduced anything."""
+    return {
+        "verdict": Verdict.REPRODUCED_AND_FIXED,
+        "fix_attempts": [
+            FixAttempt(
+                attempt_no=1,
+                patch=patch(),
+                target_test=GREEN,
+                suite=GREEN,
+                accepted=True,
+                reasoning="fabricated",
+            )
+        ],
+        "handover": handover(),
+    }
+
+
+def test_a_run_with_violated_invariants_comes_back_with_no_patch(monkeypatch, caplog):
+    monkeypatch.setattr(build_mod, "reporter_node", _lying_reporter_node)
+    # Green sandbox: nothing ever reproduced, so an accepted patch is forbidden.
+    llm = ScriptedLLM(
+        [facts(), hypothesis()] + [generated_test(i) for i in range(MAX_REPRO_ATTEMPTS)]
+    )
+
+    with caplog.at_level(logging.ERROR, logger="repro.graph"):
+        record = run(report(), llm, sandbox=StubSandbox(test_result=GREEN))
+
+    assert record.verdict == Verdict.ABORTED_BUDGET
+    assert not any(f.accepted for f in record.fix_attempts)
+    for attempt in record.fix_attempts:
+        assert attempt.patch.unified_diff == ""
+        assert attempt.patch.files_touched == []
+    assert record.handover is None
+    # And what comes back is itself sound -- we did not just relabel the problem.
+    assert record.check_invariants() == []
+    # Every violation named, at ERROR, with the run id.
+    logged = caplog.text
+    assert "verdict=fixed but no repro attempt was marked reproduced" in logged
+    assert "a patch was accepted without a reproduction: forbidden" in logged
+    assert logged.count("r1") >= 3
+    # The evidence of what went wrong is kept.
+    assert len(record.repro_attempts) == MAX_REPRO_ATTEMPTS
+
+
+def test_the_workspace_is_closed_even_when_the_graph_raises(monkeypatch):
+    workspace = FakeWorkspace()
+    monkeypatch.setattr(build_mod, "open_workspace", lambda report: workspace)
+
+    with pytest.raises(AssertionError, match="ran out of replies"):
+        run(report(), ScriptedLLM([]))  # the first node call blows up
+
+    assert workspace.closes == 1
+
+
+def test_the_workspace_is_closed_on_the_way_out_of_a_good_run(monkeypatch):
+    workspace = FakeWorkspace()
+    monkeypatch.setattr(build_mod, "open_workspace", lambda report: workspace)
+    # The graph gets a WorkspaceSandbox over the fake, so the first sandbox call
+    # is what fails here -- after the workspace has been handed over.
+    monkeypatch.setattr(build_mod, "WorkspaceSandbox", lambda ws: StubSandbox(test_result=[RED, GREEN]))
+
+    record = run(report(), happy_path_llm())
+
+    assert record.verdict == Verdict.REPRODUCED_AND_FIXED
+    assert workspace.closes == 1
+
+
+def test_two_runs_never_share_a_workspace(tmp_path):
+    # The real Workspace, the real filesystem: same run id twice, on purpose.
+    source = tmp_path / "shopcart"
+    source.mkdir()
+    (source / "pricing.py").write_text("def total():\n    return 0\n")
+    settings = Settings(workspace_root=str(tmp_path / "workspaces"))
+    client_report = ClientReport(run_id="r1", raw_text="x", repo_path=str(source))
+
+    first = build_mod.open_workspace(client_report, settings)
+    second = build_mod.open_workspace(client_report, settings)
+    try:
+        assert first.path != second.path
+        assert (first.path / "pricing.py").exists()
+        assert (second.path / "pricing.py").exists()
+        # One run finishing must not pull the tree out from under the other.
+        first.close()
+        assert not first.path.exists()
+        assert (second.path / "pricing.py").exists()
+    finally:
+        first.close()  # idempotent
+        second.close()
+
+    assert not second.path.exists()
+    assert (source / "pricing.py").exists()  # the original is never touched
+
+
+def test_two_concurrent_runs_do_not_mix_up_their_records():
+    reports = [
+        ClientReport(run_id=f"run-{i}", raw_text="charged me twice", repo_path="/tmp/shopcart")
+        for i in range(2)
+    ]
+
+    def one(client_report):
+        return run(
+            client_report, happy_path_llm(), sandbox=StubSandbox(test_result=[RED, GREEN])
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        records = list(pool.map(one, reports))
+
+    assert [r.run_id for r in records] == ["run-0", "run-1"]
+    for record in records:
+        assert record.verdict == Verdict.REPRODUCED_AND_FIXED
+        assert record.check_invariants() == []
+        # Each run was billed for its own five calls and nobody else's.
+        assert record.usage.calls == 5
+
+
+def test_assemble_run_record_survives_a_run_that_stopped_early():
+    # The clarify path: no hypotheses, no attempts, no handover.
+    record = assemble_run_record(
+        {"report": report(), "facts": facts(), "verdict": Verdict.NEEDS_CLARIFICATION}
+    )
+
+    assert record.verdict == Verdict.NEEDS_CLARIFICATION
+    assert record.hypotheses == [] and record.repro_attempts == [] and record.fix_attempts == []
+    assert record.handover is None
+    assert record.usage.calls == 0
+    assert record.check_invariants() == []

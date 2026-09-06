@@ -12,6 +12,10 @@ WORST CASE MODEL CALLS FOR ONE RUN: 9.
 """
 from __future__ import annotations
 
+import logging
+import time
+from pathlib import Path
+
 from langgraph.graph import END, START, StateGraph
 
 from repro.agents.clarify import clarify_node
@@ -26,13 +30,20 @@ from repro.contracts import (
     MAX_REPRO_ATTEMPTS,
     MAX_RUN_USD,
     MAX_TOTAL_LLM_CALLS,
+    ClientReport,
     LLMResponse,
+    Patch,
+    RunRecord,
     TokenUsage,
     Verdict,
 )
-from repro.graph.sandbox_seam import Sandbox, StubSandbox
+from repro.graph.sandbox_seam import Sandbox, StubSandbox, WorkspaceSandbox
 from repro.graph.state import GraphState
 from repro.llm.base import LLMClient
+from repro.sandbox.workspace import Workspace
+from repro.settings import Settings
+
+LOG = logging.getLogger("repro.graph")
 
 # Not a loop bound, so it does not live in contracts.py: this is the intake
 # quality gate from docs/ARCHITECTURE.md ("confidence < 0.6 or missing critical").
@@ -238,3 +249,122 @@ def build_graph(llm: LLMClient, sandbox: Sandbox | None = None):
     graph.add_edge("report", END)
 
     return graph.compile()
+
+
+# ---------------------------------------------------------------------------
+# The public entry point.
+# ---------------------------------------------------------------------------
+
+
+def assemble_run_record(final_state: GraphState) -> RunRecord:
+    """Terminal GraphState -> the audit trail contract. No I/O, no model."""
+    report = final_state["report"]
+    return RunRecord(
+        run_id=report.run_id,
+        report=report,
+        facts=final_state.get("facts"),
+        questions=list(final_state.get("questions", [])),
+        hypotheses=list(final_state.get("hypotheses", [])),
+        repro_attempts=list(final_state.get("repro_attempts", [])),
+        fix_attempts=list(final_state.get("fix_attempts", [])),
+        verdict=final_state.get("verdict") or Verdict.NOT_REPRODUCED,
+        handover=final_state.get("handover"),
+        usage=final_state.get("usage") or TokenUsage(),
+    )
+
+
+def open_workspace(report: ClientReport, settings: Settings | None = None) -> Workspace:
+    """A disposable copy of the target repo, private to this run.
+
+    `/tmp/repro-workspaces/<run_id>` per ARCHITECTURE.md, and that is only the
+    parent: Workspace mkdtemps a fresh directory inside it, so even two runs
+    that share a run id (a retry, a replayed cassette) get separate trees and
+    neither can delete the other's in `close()`.
+    """
+    settings = settings or Settings()
+    return Workspace(report.repo_path, root=Path(settings.workspace_root) / report.run_id)
+
+
+def run(report: ClientReport, llm: LLMClient, *, sandbox: Sandbox | None = None) -> RunRecord:
+    """Run one report end to end. This is the function everyone else calls.
+
+        from repro.graph.build import run
+        record: RunRecord = run(client_report, llm)
+
+    Safe to call concurrently: every run gets its own workspace, its own
+    compiled graph and its own meter, and shares nothing but the LLM client.
+
+    Pass `sandbox` to supply your own (tests, or a caller that owns the
+    workspace already); then closing it is the caller's job.
+    """
+    started = time.monotonic()
+    workspace: Workspace | None = None
+    try:
+        if sandbox is None:
+            workspace = open_workspace(report)
+            sandbox = WorkspaceSandbox(workspace)
+        initial: GraphState = {"report": report}
+        if workspace is not None:
+            initial["workspace_path"] = str(workspace.path)
+        final_state = build_graph(llm, sandbox=sandbox).invoke(initial)
+    finally:
+        # Even when the graph raised. A leaked workspace is a leaked copy of a
+        # client's repository sitting in /tmp.
+        if workspace is not None:
+            workspace.close()
+
+    record = assemble_run_record(final_state)
+    record.wall_clock_s = round(time.monotonic() - started, 3)
+    return enforce_invariants(record)
+
+
+def enforce_invariants(record: RunRecord) -> RunRecord:
+    """The last gate before anything leaves this process.
+
+    A record that violates its own invariants is a record we cannot explain, so
+    it does not get to ship a patch. Everything else is kept: the attempts, the
+    counts and the cost are the evidence of what went wrong.
+    """
+    violations = record.check_invariants()
+    if not violations:
+        return record
+
+    LOG.error(
+        "run %s VIOLATED %d INVARIANT(S); verdict forced to %s and every patch withheld",
+        record.run_id,
+        len(violations),
+        Verdict.ABORTED_BUDGET.value,
+    )
+    for violation in violations:
+        LOG.error("run %s invariant violated: %s", record.run_id, violation)
+
+    return record.model_copy(
+        update={
+            "verdict": Verdict.ABORTED_BUDGET,
+            "fix_attempts": [
+                attempt.model_copy(
+                    update={
+                        "patch": _WITHHELD_PATCH,
+                        "accepted": False,
+                        "reasoning": f"Patch withheld, run unsound. {attempt.reasoning}",
+                    }
+                )
+                for attempt in record.fix_attempts
+            ],
+            # The handover was written from evidence we have just declared
+            # unsound, and a client_reply must never promise a fix the verdict
+            # does not support.
+            "handover": None,
+        }
+    )
+
+
+#: What replaces a patch that may not ship. Empty diff, and it says why.
+_WITHHELD_PATCH = Patch(
+    unified_diff="",
+    files_touched=[],
+    rationale=(
+        "Withheld. This run violated its own invariants, so no patch from it may be "
+        "shown to a human as if it were verified."
+    ),
+)
