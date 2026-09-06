@@ -12,6 +12,7 @@ MODULES = [
     "repro.sandbox.runner",
     "repro.sandbox.patcher",
     "repro.sandbox.fake",
+    "repro.sandbox.repo_facts",
     "repro.retrieval.index",
     "repro.graph.state",
     "repro.graph.build",
