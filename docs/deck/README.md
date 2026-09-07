@@ -3,13 +3,18 @@
 Task E4 in `tasks/ENGINEER_E.md`. Session 3's sample flow, one message per
 slide, every number carrying its source in the footer rail of the slide itself.
 
-Eleven slides, not ten: "Technical architecture" is split into **05, the agent
-graph** and **06, the guardrails**, because the graph is the slide a technical
-judge reads rather than listens to and it needs the whole canvas. Slide 05 is a
-hand-authored inline SVG redrawing of the diagram in `docs/ARCHITECTURE.md`,
-laid out from `graph/build.py` — `build_graph:352-376` and the three routers —
-so the branches, both self-loops and all three no-patch exits are the ones the
-code actually takes.
+**Ten slides, and the deck order is also the video order.** `docs/deck/SPEECH.md`
+walks 01 to 10 with `→` and never jumps: the live demo happens *on* slide 08,
+which is the demo slide, so you cut to the browser and cut back. A deck whose
+running order needs the presenter to skip forward and jump back is a badly
+ordered deck, not a presentation problem.
+
+Slide 05 is a hand-authored inline SVG redrawing of the diagram in
+`docs/ARCHITECTURE.md`, laid out from `graph/build.py` — `build_graph:352-376`
+and the three routers — so the branches, both self-loops and all three no-patch
+exits are the ones the code actually takes. The bounds and the vocabulary gap
+sit under it on the same canvas; the seam's seven methods, the pre-call budget
+checks and the full stack are in that slide's speaker notes rather than on it.
 
 **Published (with speaker notes and a present mode):**
 https://claude.ai/code/artifact/2d1d50a5-cd28-4c21-a40e-ee6ad7d842df

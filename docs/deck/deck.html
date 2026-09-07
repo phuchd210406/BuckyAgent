@@ -378,7 +378,7 @@ body.presenting .pbar { display: flex; }
 
 <header class="topbar">
   <span class="wordmark">Repro<i>.</i></span>
-  <span class="sub">from &ldquo;it&rsquo;s broken&rdquo; to a failing test &middot; 11 slides</span>
+  <span class="sub">from &ldquo;it&rsquo;s broken&rdquo; to a failing test &middot; 10 slides</span>
   <span class="spacer"></span>
   <button class="btn" id="theme">Theme</button>
   <button class="btn btn-primary" id="present">Present</button>
@@ -386,12 +386,11 @@ body.presenting .pbar { display: flex; }
 
 <div class="intro">
   <p>Scroll for the deck with speaker notes, or press <strong>Present</strong> for one slide at a time (&larr; &rarr; to move, Esc to exit). Every figure carries its source in the footer rail.
-  <span class="warn">Two things are still owed before this is final &mdash; slide 2&rsquo;s interview quote and slide 8&rsquo;s live numbers; both are marked in amber on the slide.</span></p>
+  <span class="warn">Two things are still owed before this is final &mdash; slide 2&rsquo;s interview quote and slide 7&rsquo;s live numbers; both are marked in amber on the slide.</span></p>
 </div>
 
 <div class="deck" id="deck">
 
-<!-- ─────────────────────────────── 1 ─────────────────────────────── -->
 <section class="block">
   <article class="slide phase-red">
     <div class="shead"><span class="snum">01</span><span class="seyebrow">Title &amp; team</span></div>
@@ -417,7 +416,6 @@ body.presenting .pbar { display: flex; }
   </div>
 </section>
 
-<!-- ─────────────────────────────── 2 ─────────────────────────────── -->
 <section class="block">
   <article class="slide phase-red">
     <div class="shead"><span class="snum">02</span><span class="seyebrow">Problem &amp; why it matters</span></div>
@@ -459,7 +457,6 @@ body.presenting .pbar { display: flex; }
   </div>
 </section>
 
-<!-- ─────────────────────────────── 3 ─────────────────────────────── -->
 <section class="block">
   <article class="slide phase-build">
     <div class="shead"><span class="snum">03</span><span class="seyebrow">Solution overview</span></div>
@@ -495,7 +492,6 @@ body.presenting .pbar { display: flex; }
   </div>
 </section>
 
-<!-- ─────────────────────────────── 4 ─────────────────────────────── -->
 <section class="block">
   <article class="slide phase-build">
     <div class="shead"><span class="snum">04</span><span class="seyebrow">Methodology</span></div>
@@ -510,7 +506,7 @@ body.presenting .pbar { display: flex; }
               <tr><td>The Everyone Problem</td><td>&ldquo;Developers&rdquo; is 30 million people &rarr; one solo maintainer, no QA, client emails them directly.</td></tr>
               <tr><td>The Missing Because</td><td>Asserted &rarr; two citations, both about the <em>reproduction</em> gap specifically.</td></tr>
               <tr><td>The Boiling Ocean</td><td>&ldquo;Fix bugs&rdquo; is the discipline &rarr; one slice: complaint &rarr; red test.</td></tr>
-              <tr class="star"><td>The Solved Problem</td><td>The real danger. Answered in full on slide 7.</td></tr>
+              <tr class="star"><td>The Solved Problem</td><td>The real danger. Answered in full on slide 6.</td></tr>
             </tbody>
           </table>
         </div>
@@ -532,18 +528,17 @@ body.presenting .pbar { display: flex; }
   </article>
   <div class="notes">
     <h4>Speaker notes</h4>
-    <p><span class="crit">PRESENTATION</span><span class="crit">ORIGINALITY</span> One message: <em>we narrowed on purpose, and we can show our working.</em> Do not read the left table row by row &mdash; point at it, say &ldquo;we ran our statement through six failure modes and it survived five; the sixth is slide 7&rdquo;, and spend your time on the right column.</p>
+    <p><span class="crit">PRESENTATION</span><span class="crit">ORIGINALITY</span> One message: <em>we narrowed on purpose, and we can show our working.</em> Do not read the left table row by row &mdash; point at it, say &ldquo;we ran our statement through six failure modes and it survived five; the sixth is slide 6&rdquo;, and spend your time on the right column.</p>
     <p>The right column is the answer to &ldquo;why is this agentic rather than a script?&rdquo;, which is graded separately. All four behaviours are visible in the demo, and the second one is the retry the video must not cut.</p>
   </div>
 </section>
 
-<!-- ─────────────────────────────── 5 ─────────────────────────────── -->
 <section class="block">
   <article class="slide phase-build">
-    <div class="shead"><span class="snum">05</span><span class="seyebrow">Technical architecture &mdash; the graph</span></div>
+    <div class="shead"><span class="snum">05</span><span class="seyebrow">Technical architecture</span></div>
     <div class="sbody">
       <h2 class="stitle" style="font-size:2.6cqw;">Two loops, and a branch that ends the run rather than guess.</h2>
-      <figure style="margin:1.2cqw 0 0;">
+      <figure style="width:84%; margin:.8cqw auto 0;">
         <svg viewBox="0 0 1320 470" role="img" width="100%" style="height:auto; display:block;"
              aria-label="The Repro agent graph. A prepare step outside the graph clones the repository, copies it to a sandbox and builds a per-run virtualenv. Inside LangGraph: intake either branches down to clarify, which asks one question and ends the run, or forwards to localise, then repro. Repro loops on itself up to three times while the test it writes keeps passing, because a passing test is not a reproduction; once a test fails for the right reason it goes to fix. Fix loops on itself up to three times while the patch fails to make both the repro test and the existing suite green; once both are green it goes to report. Either loop exhausting its three attempts routes to report instead. Report writes the RunRecord, whose invariants are checked before anything leaves the process.">
           <defs>
@@ -631,31 +626,10 @@ body.presenting .pbar { display: flex; }
             <text x="1292" y="438" font-size="11" text-anchor="end" opacity=".78">or every patch body is emptied before it leaves the process</text>
           </g>
         </svg>
-        <figcaption style="font-size:1.18cqw; color:var(--muted); margin-top:1cqw; line-height:1.45;">
-          <strong style="color:var(--ink)">reproduced</strong> means a test ran and failed for the reported reason; <strong style="color:var(--ink)">accepted</strong> means the repro test went red&rarr;green <em>and</em> the pre-existing suite stayed green. Both are computed from an <span class="mono">ExecutionResult</span>, never asked of the model. Solid arrows are the happy path; the dashed ones are the three ways a run ends with no patch and an honest reply. Not drawn because it applies at every router: <span class="mono">budget_exhausted()</span> is checked first everywhere and sends the run straight to <span class="mono">report</span>.
-        </figcaption>
       </figure>
-    </div>
-    <div class="src"><b>Every edge and branch above:</b> <span class="mono">graph/build.py</span> &mdash; <span class="mono">build_graph:352&ndash;376</span>, <span class="mono">route_after_intake:135</span>, <span class="mono">route_after_repro:160</span>, <span class="mono">route_after_fix:176</span>. <b>Prepare:</b> <span class="mono">build.py:469</span> + <span class="mono">sandbox/deps.py</span>. <b>Original drawing:</b> <span class="mono">docs/ARCHITECTURE.md</span>.</div>
-  </article>
-  <div class="notes">
-    <h4>Speaker notes</h4>
-    <p><span class="crit">TECHNICAL QUALITY</span> One message: <em>the two red loops are the agent, and everything else is a pipeline.</em> Trace one path with your finger and stop talking &mdash; this slide is read, not narrated.</p>
-    <p>The line to say out loud is the <strong>repro loop</strong>: &ldquo;if the test it just wrote <em>passes</em>, that is not a win, it is evidence the hypothesis was wrong &mdash; so it goes back and tries again, at most three times.&rdquo; A judge who understands that one arrow understands the product.</p>
-    <p>Three of the four routes out of this graph end with no patch: clarify, three spent repro attempts, three spent fix attempts. That is the shape of a system built to decline.</p>
-    <p>If asked how a router decides: it reads the <span class="mono">ExecutionResult</span>, never the model&rsquo;s opinion. <span class="mono">reproduced</span> and <span class="mono">accepted</span> are computed from pytest, and <span class="mono">route_after_intake</span> even re-checks the model&rsquo;s own <span class="mono">missing</span> list against the facts it just filled in &mdash; on one recorded run it named three fields that are not on <span class="mono">ReportFacts</span> at all.</p>
-  </div>
-</section>
-
-<!-- ─────────────────────────────── 6 ─────────────────────────────── -->
-<section class="block">
-  <article class="slide phase-build">
-    <div class="shead"><span class="snum">06</span><span class="seyebrow">Technical architecture &mdash; the guardrails</span></div>
-    <div class="sbody">
-      <h2 class="stitle" style="font-size:2.6cqw;">Bounded in plain Python, and searching for the client&rsquo;s words, not ours.</h2>
-      <div class="cols c2" style="margin-top:1.7cqw;">
+      <div class="cols c2w" style="margin-top:1cqw; gap:2.2cqw;">
         <div>
-          <p style="font-size:1.15cqw; letter-spacing:.13em; text-transform:uppercase; color:var(--muted); font-weight:600; margin-bottom:.8cqw;">Bounds, read by routers &mdash; never by the model&rsquo;s opinion</p>
+          <p style="font-size:1.02cqw; letter-spacing:.13em; text-transform:uppercase; color:var(--muted); font-weight:600; margin:0 0 .5cqw;">Every loop bounded in plain Python &mdash; never by the model&rsquo;s opinion</p>
           <div class="bounds">
             <span class="bound">MAX_CLARIFY_ROUNDS = 1</span>
             <span class="bound">MAX_LOCALISE_CANDIDATES = 5</span>
@@ -663,49 +637,34 @@ body.presenting .pbar { display: flex; }
             <span class="bound">MAX_FIX_ATTEMPTS = 3</span>
             <span class="bound">MAX_TOTAL_LLM_CALLS = 40</span>
             <span class="bound">MAX_RUN_USD = 0.25</span>
-            <span class="bound">SANDBOX_TIMEOUT_S = 60</span>
-            <span class="bound">SANDBOX_MAX_OUTPUT_CHARS = 4000</span>
           </div>
-          <p style="margin-top:1.1cqw; font-size:1.18cqw;">
-            Both money caps are checked <strong>before</strong> each call against a pessimistic estimate, not after &mdash; the call that breaks the cap is the one you wanted to stop.
-          </p>
-          <p style="margin:.7cqw 0 0; font-size:1.18cqw;">
-            The agent&rsquo;s whole surface is <strong>one Protocol, seven methods, four capabilities</strong>: search, write under <span class="mono">tests/</span>, run pytest, apply/revert a diff. No shell, no network, no install &mdash; a real project&rsquo;s dependencies go into a per-run venv <em>before</em> <span class="mono">START</span>, by a function no node can reach.
-          </p>
         </div>
         <div>
-          <p style="font-size:1.15cqw; letter-spacing:.13em; text-transform:uppercase; color:var(--muted); font-weight:600; margin-bottom:.7cqw;">The problem retrieval actually solves is a vocabulary gap</p>
+          <p style="font-size:1.02cqw; letter-spacing:.13em; text-transform:uppercase; color:var(--muted); font-weight:600; margin:0 0 .5cqw;">And retrieval searches the client&rsquo;s words, not ours</p>
           <div class="vocab">
             <span>client writes</span><b class="v-c">&ldquo;free postage over $50&rdquo;</b>
             <span>code says</span><b class="v-k">free_shipping_threshold</b>
           </div>
-          <p style="margin:.8cqw 0 1.1cqw; font-size:1.15cqw;">
-            A perfect BM25 over the wrong words still ranks the wrong file first. So identifiers split on snake_ and camelCase, a small hand-kept synonym map bridges the rest at <span class="mono">SYNONYM_WEIGHT&nbsp;=&nbsp;0.6</span> &mdash; a synonym is weaker evidence than the client&rsquo;s own word &mdash; and the unit of retrieval is a <strong>function</strong>, so the model gets a symbol to hang a hypothesis on instead of a page dump.
-          </p>
-          <dl class="stackrow">
-            <dt>Model</dt><dd>Claude Haiku 4.5, one per run &mdash; Bedrock <span class="mono">converse</span> or the first-party API</dd>
-            <dt>Graph</dt><dd>LangGraph, typed state; no chat transcript accumulates</dd>
-            <dt>Sandbox</dt><dd><span class="mono">subprocess</span> + <span class="mono">tempfile</span>, per-run venv. Zero infra</dd>
-            <dt>Deployed</dt><dd>FastAPI + SSE on Render free tier; Vite/React on Vercel; AgentCore recorded once</dd>
-          </dl>
         </div>
       </div>
     </div>
-    <div class="src"><b>Bounds:</b> <span class="mono">src/repro/contracts.py:39&ndash;48</span>. <b>Wiring:</b> <span class="mono">graph/build.py:352&ndash;376</span>. <b>Protocol:</b> <span class="mono">graph/sandbox_seam.py:85</span>. <b>Vocabulary gap:</b> <span class="mono">retrieval/index.py:62&ndash;100</span>. <b>Guards:</b> <span class="mono">llm/budget.py</span>. <b>Venv before START:</b> <span class="mono">graph/build.py:469</span>.</div>
+    <div class="src"><b>Every edge above:</b> <span class="mono">graph/build.py</span> &mdash; <span class="mono">build_graph:352&ndash;376</span>, <span class="mono">route_after_intake:135</span>, <span class="mono">route_after_repro:160</span>, <span class="mono">route_after_fix:176</span>. <b>Bounds:</b> <span class="mono">contracts.py:39&ndash;48</span>. <b>Vocabulary gap:</b> <span class="mono">retrieval/index.py:62&ndash;100</span>. <b>Stack:</b> LangGraph &middot; Pydantic v2 &middot; <span class="mono">subprocess</span> sandbox &middot; FastAPI+SSE on Render &middot; React on Vercel.</div>
   </article>
   <div class="notes">
     <h4>Speaker notes</h4>
-    <p><span class="crit">TECHNICAL QUALITY</span> One message: <em>the loops are bounded by code, not by the model&rsquo;s opinion of whether it is finished.</em> That is the difference between a demo and something you would leave running.</p>
-    <p>If asked why no vector database: our corpus is one repository, in a temp directory, for sixty seconds. OpenSearch&rsquo;s minimum always-on capacity costs hundreds a month. A vector DB here is a budget bonfire and an architecture smell &mdash; that answer scores better than having built one. The synonym map is the honest version of the same point: ten entries of hand-written vocabulary beat an embedding model on this corpus, and you can read all ten.</p>
-    <p><strong>Say &ldquo;one model per run&rdquo; and nothing more about model choice.</strong> <span class="warnchip">DO NOT CLAIM</span> <span class="mono">docs/ARCHITECTURE.md</span> describes escalating to Sonnet on the last attempt; that is not built. Both clients fix their model at construction (<span class="mono">llm/bedrock.py:116</span>, <span class="mono">llm/anthropic_api.py:59</span>), and Sonnet appears only in <span class="mono">settings.PRICES</span>. Do not claim it.</p>
-    <p>The red node and the green node are the two that matter. Everything else is plumbing.</p>
+    <p><span class="crit">TECHNICAL QUALITY</span> One message: <em>the two red loops are the agent, and everything else is a pipeline.</em> Trace one path with your finger and stop talking &mdash; this slide is read, not narrated.</p>
+    <p>The line to say out loud is the <strong>repro loop</strong>: &ldquo;if the test it just wrote <em>passes</em>, that is not a win, it is evidence the hypothesis was wrong &mdash; so it goes back and tries again, at most three times.&rdquo; A judge who understands that one arrow understands the product.</p>
+    <p>Three of the four routes out of this graph end with no patch: clarify, three spent repro attempts, three spent fix attempts. That is the shape of a system built to decline.</p>
+    <p><strong>The vocabulary gap answers &ldquo;why no vector database?&rdquo;</strong> Our corpus is one repository, in a temp directory, for sixty seconds, and OpenSearch&rsquo;s minimum always-on capacity costs hundreds a month. Ten hand-written synonyms you can read beat an embedding model here; identifiers split on snake_ and camelCase do the rest; and retrieval returns a <em>function</em>, not a file, so the model gets a symbol rather than a page dump.</p>
+    <p>Have these ready but keep them off the slide: the agent&rsquo;s whole surface is one Protocol, seven methods, four capabilities &mdash; search, write under <span class="mono">tests/</span>, run pytest, apply/revert a diff. No shell, no network, no install; a real project&rsquo;s dependencies go into a per-run venv <em>before</em> <span class="mono">START</span>, by a function no node can reach. Both money caps are checked <strong>before</strong> each call against a pessimistic estimate, not after &mdash; the call that breaks the cap is the one you wanted to stop.</p>
+    <p><strong>Say &ldquo;one model per run&rdquo; and nothing more about model choice.</strong> <span class="warnchip">DO NOT CLAIM</span> <span class="mono">docs/ARCHITECTURE.md</span> describes escalating to Sonnet on the last attempt; that is not built. Both clients fix their model at construction (<span class="mono">llm/bedrock.py:116</span>, <span class="mono">llm/anthropic_api.py:59</span>) and Sonnet appears only in <span class="mono">settings.PRICES</span>.</p>
+    <p>If asked how a router decides: it reads the <span class="mono">ExecutionResult</span>, never the model&rsquo;s opinion. <span class="mono">reproduced</span> and <span class="mono">accepted</span> are computed from pytest, and <span class="mono">route_after_intake</span> even re-checks the model&rsquo;s own <span class="mono">missing</span> list against the facts it just filled in &mdash; on one recorded run it named three fields that are not on <span class="mono">ReportFacts</span> at all.</p>
   </div>
 </section>
 
-<!-- ─────────────────────────────── 6 ─────────────────────────────── -->
 <section class="block">
   <article class="slide phase-build">
-    <div class="shead"><span class="snum">07</span><span class="seyebrow">Innovation &amp; uniqueness</span></div>
+    <div class="shead"><span class="snum">06</span><span class="seyebrow">Innovation &amp; uniqueness</span></div>
     <div class="sbody">
       <h2 class="stitle">&ldquo;Doesn&rsquo;t Copilot already do this?&rdquo;</h2>
       <p style="font-size:1.45cqw; margin:1.1cqw 0 1.7cqw; color:var(--muted);">
@@ -745,10 +704,9 @@ body.presenting .pbar { display: flex; }
   </div>
 </section>
 
-<!-- ─────────────────────────────── 7 ─────────────────────────────── -->
 <section class="block">
   <article class="slide phase-green">
-    <div class="shead"><span class="snum">08</span><span class="seyebrow">Benefits &amp; evaluation</span></div>
+    <div class="shead"><span class="snum">07</span><span class="seyebrow">Benefits &amp; evaluation</span></div>
     <div class="sbody">
       <h2 class="stitle" style="font-size:3cqw;">False-fix rate is 0% &mdash; by construction, not by luck.</h2>
       <div class="tiles" style="margin-top:1.5cqw;">
@@ -807,10 +765,9 @@ body.presenting .pbar { display: flex; }
   </div>
 </section>
 
-<!-- ─────────────────────────────── 8 ─────────────────────────────── -->
 <section class="block">
   <article class="slide phase-green">
-    <div class="shead"><span class="snum">09</span><span class="seyebrow">Demo preview</span></div>
+    <div class="shead"><span class="snum">08</span><span class="seyebrow">Demo preview</span></div>
     <div class="sbody">
       <h2 class="stitle" style="font-size:2.7cqw;">The first attempt failing is the most important fifteen seconds we have.</h2>
       <div class="shots" style="margin-top:1.6cqw;">
@@ -839,10 +796,9 @@ body.presenting .pbar { display: flex; }
   </div>
 </section>
 
-<!-- ─────────────────────────────── 9 ─────────────────────────────── -->
 <section class="block">
   <article class="slide phase-green">
-    <div class="shead"><span class="snum">10</span><span class="seyebrow">Roadmap</span></div>
+    <div class="shead"><span class="snum">09</span><span class="seyebrow">Roadmap</span></div>
     <div class="sbody">
       <h2 class="stitle">Three steps, in the order the evidence justifies.</h2>
       <div class="cols c3" style="margin-top:2cqw;">
@@ -873,10 +829,9 @@ body.presenting .pbar { display: flex; }
   </div>
 </section>
 
-<!-- ─────────────────────────────── 10 ────────────────────────────── -->
 <section class="block">
   <article class="slide phase-green">
-    <div class="shead"><span class="snum">11</span><span class="seyebrow">Conclusion</span></div>
+    <div class="shead"><span class="snum">10</span><span class="seyebrow">Conclusion</span></div>
     <div class="sbody" style="display:grid; grid-template-rows:1fr auto; gap:2cqw;">
       <div style="align-self:center;">
         <div class="big" style="font-size:3.9cqw;">Every other agent will hand you a patch.<br>Ask it to show you the test that&nbsp;failed first.</div>
@@ -905,7 +860,7 @@ body.presenting .pbar { display: flex; }
     <h4>Speaker notes</h4>
     <p><span class="crit">PRESENTATION</span><span class="crit">ORIGINALITY</span> The call to action is deliberately a challenge, not a demo request: <em>ask any agent for the test that failed first.</em> It reframes our refusal as the thing to want, and it is what a judge will remember in the corridor.</p>
     <p>End on the last column. Inviting someone to go and check the one function that would falsify the whole pitch is the strongest close available, and it only works because it is true.</p>
-    <p>Time check: if you are over, cut slide 4 to a sentence. Never cut 7 or 8.</p>
+    <p>Time check: if you are over, cut slide 4 to a sentence. Never cut 6 or 7.</p>
   </div>
 </section>
 

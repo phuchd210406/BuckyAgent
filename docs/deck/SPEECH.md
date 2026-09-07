@@ -5,21 +5,21 @@ Task E5 in `tasks/ENGINEER_E.md`. **Script it, then record. Do not improvise.**
 Mode: a **real run against Bedrock** — Claude Haiku 4.5, AWS access keys. Every
 number said aloud below is one this repository can produce.
 
-- **Speech:** 613 words. At a presenting pace (~145 wpm) that is 4 min 14 s of
-  talking inside a 5 min video. Every section below has 2–5 seconds of slack on
-  top of the words, and the demo carries ~22 seconds of deliberate silence —
-  those are the seconds where the agent is being watched, not described.
-  **If you are consistently landing over 5:00, cut slide 10 first.**
-- **Slides used on camera:** 01, 02, 03, 07, 08, 05, 10, 11 — in that order.
-  Slides 04, 06 and 09 are for the deck a judge reads, not for the video.
-  (Slide 09's screenshots are your fallback if the live demo dies.)
+**The deck order is the video order.** Ten slides, Session 3's flow, and you
+advance with `→` and never go back. The live demo happens *on* slide 08, which is
+the demo slide: you cut to the browser and cut back. There is no jumping.
+
+- **Speech:** 649 words. At a presenting pace (~145 wpm) that is about 4 min 10 s
+  of talking inside a 5 min video. Every section has 2–5 seconds of slack, and the
+  demo carries ~20 seconds of deliberate silence — the seconds where the agent is
+  being watched, not described.
 
 ---
 
 ## Before you press record
 
 ```bash
-# 1. Credentials. The keys expire every 12h — re-paste them first, every time.
+# 1. Credentials. Sandbox keys expire every 12h — re-paste them first, every time.
 #    .env needs AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN
 #    and AWS_DEFAULT_REGION=us-east-1
 make check-bedrock          # must print the model id that answers. Do not skip.
@@ -29,44 +29,47 @@ LLM_PROVIDER=bedrock make api
 make web
 ```
 
-Then, in the browser, **before recording**:
+Then, before recording:
 
-1. Open `http://localhost:5173`. Confirm the badge names **Claude Haiku 4.5
-   (Bedrock)** and not "recorded replies". If it says replay, the keys are not
-   loaded — stop and fix that.
-2. **Code** tab → Demo repo → **shopcart**. Leave it on the Code tab. That is
-   your opening frame.
-3. Browser at 1440×900, zoom 110%, bookmarks bar hidden, notifications off.
-4. **Rehearse the run two or three times for real.** It costs about 1.5 cents a
-   go. You are checking one thing: *does the fix get accepted?* Read
-   "If the patch is refused" at the bottom before you decide which script to use.
+1. **The deck.** Open the artifact, click **Theme** and force **light** — the app
+   is light, and cutting between a dark slide and a light app is jarring. Then
+   **Present**, then `F11` for fullscreen. `→` forward, `Esc` out.
+2. **The app.** `http://localhost:5173`. Confirm the badge names **Claude Haiku
+   4.5 (Bedrock)**, not "recorded replies". If it says replay, the keys are not
+   loaded — stop and fix it, or you will narrate a real run over a fake one.
+3. **Code** tab → Demo repo → **shopcart**. Leave it there; that is the frame you
+   cut to at 2:54.
+4. Browser at 1440×900, zoom 110%, bookmarks bar hidden, notifications off.
+5. **Rehearse the run two or three times for real.** About 1.5 cents each. You are
+   checking one thing: *does the fix get accepted?* Read "If the patch is refused"
+   at the bottom before you commit to the script below.
+
+Record the slide segments and the demo as **separate clips** and assemble them.
+You want that anyway: you can re-take the demo without re-recording the narration.
 
 Record at 1080p, deliver 720p, captions throughout. Check the code is legible
 after compression on a 30-second test clip **before** recording all five minutes.
 
 ---
 
-## Shot list
+## Shot list — straight through, 01 to 10
 
-| Time | Window | On screen | Beat |
+| Time | Window | Slide | Beat |
 |---|---|---|---|
-| 0:00 | 18s | Slide 01 | Who we are, in one line |
-| 0:18 | 52s | Slide 02 | The email, read aloud. The 92% |
-| 1:10 | 20s | Slide 03 | The differentiator is a refusal |
-| 1:30 | 18s | Slide 07 | "Doesn't Copilot already do this?" |
-| 1:48 | 20s | **Browser** | The repo, the complaint, Run |
-| 2:08 | 20s | **Browser** | Intake, localise — narrate the reasoning |
-| 2:28 | 18s | **Browser** | **Attempt 1 passed. Not a reproduction.** |
-| 2:44 | 10s | **Browser** | Attempt 2 is red. Proof |
-| 2:54 | 20s | **Browser** | Patch, two green badges |
-| 3:14 | 14s | **Browser** | The client reply |
-| 3:28 | 24s | Slide 08 | 0% false fix, 1.5 cents |
-| 3:52 | 24s | Slide 05 | The graph — how |
-| 4:16 | 20s | Slide 10 | Roadmap |
-| 4:36 | 24s | Slide 11 | Close |
+| 0:00 | 14s | **01** Title & team | Who we are, in one line |
+| 0:14 | 54s | **02** Problem | The email, read aloud. The 92% |
+| 1:08 | 20s | **03** Solution | The differentiator is a refusal |
+| 1:28 | 18s | **04** Methodology | How we scoped down |
+| 1:46 | 26s | **05** Architecture | Two loops. The graph |
+| 2:12 | 20s | **06** Innovation | "Doesn't Copilot already do this?" |
+| 2:32 | 22s | **07** Benefits | 0% false-fix — then: watch it |
+| 2:54 | 90s | **08** Demo → **cut to browser** | The live run |
+| 4:24 | 20s | **09** Roadmap | What's next |
+| 4:44 | 16s | **10** Conclusion | The challenge, and thank you |
 
-The demo window is 1:48–3:28, and a real run takes about 35 seconds end to end.
-Click **Run** at roughly 2:05 and the stream will land under your narration.
+A real run takes about 35 seconds end to end. Show slide 08 for three seconds,
+cut to the browser, click **Run** at roughly 3:12, and the stream lands under
+your narration. Cut back to the deck on slide 09 — never back to 08.
 
 ---
 
@@ -74,15 +77,14 @@ Click **Run** at roughly 2:05 and the stream will land under your narration.
 
 ### 0:00 · Slide 01
 
-> We're Repro. We take the email a client sends when something breaks, and we
-> turn it into a test that fails for the reason they described. From "it's
-> broken" — to a failing test.
+> We're Repro. We take the email a client sends when something breaks, and turn
+> it into a test that fails for the reason they described.
 
-**Advance on "failing test."**
+**Advance on "described."**
 
 ---
 
-### 0:18 · Slide 02
+### 0:14 · Slide 02
 
 > Here's what that email actually looks like.
 
@@ -105,7 +107,7 @@ Click **Run** at roughly 2:05 and the stream will land under your narration.
 
 ---
 
-### 1:10 · Slide 03
+### 1:08 · Slide 03
 
 > Our solution has one differentiator, and it's a refusal.
 >
@@ -115,50 +117,74 @@ Click **Run** at roughly 2:05 and the stream will land under your narration.
 
 ---
 
-### 1:30 · Slide 07
+### 1:28 · Slide 04
 
-> You're about to ask whether Copilot's coding agent already does this.
+> We got here by trying to break our own problem statement — six ways it could
+> have been too vague, too broad, or already solved.
+>
+> It survived five of them. The sixth is the next slide but one.
+
+---
+
+### 1:46 · Slide 05
+
+> Six nodes, and the two red loops are what make this an agent.
+>
+> Repro loops when the test it just wrote *passes* — because a passing test means
+> it did **not** reproduce the bug. Fix loops until both pytest runs come back
+> green. Three of the four ways out of this graph end with no patch.
+
+---
+
+### 2:12 · Slide 06
+
+> Now that sixth one. You're about to ask whether Copilot's coding agent already
+> does this.
 >
 > Copilot, Devin and gitagent all start from a well-formed GitHub issue. Writing
 > that issue is exactly the work our person cannot get the client to do.
 
-**Cut to the browser on the last word.**
+---
+
+### 2:32 · Slide 07
+
+> So what did we measure?
+>
+> The number that matters is the false-fix rate. Zero percent — not because we got
+> lucky on nine cases, but because a function refuses the record.
+>
+> Let me show you that zero being enforced. Live.
 
 ---
 
-### 1:48 · Browser — the setup
+### 2:54 · Slide 08 → cut to the browser
+
+**Hold slide 08 for ~3 seconds, then cut.**
 
 **ON SCREEN:** Code tab, shopcart, `pricing.py` open.
 
-> This is the repository the agent is about to search — four files, and its
-> existing test suite.
+> This is the repository it's about to search, and its existing test suite.
 
 **DO:** Click **Use this complaint**. The email appears in the box.
 
 > That's the client's email, exactly as she wrote it.
 
-**DO:** Click **Run**. Switch to the **Run** tab.
+**DO:** Click **Run**. Switch to the **Run** tab. *(~3:12)*
 
 > This is a real run. Claude Haiku 4.5, on Bedrock, right now.
 
----
-
-### 2:08 · Browser — narrate the reasoning, never the UI
-
 *As intake and localise stream in:*
 
-> It's pulled out what she said, and marked what she didn't say.
+> It's pulled out what she said, and marked what she didn't.
 >
-> Now it's guessing where the bug is. It's picked `pricing.py` — because she
-> wrote "postage", and the code says "shipping".
+> It's picked `pricing.py` — because she wrote "postage", and the code says
+> "shipping".
 >
-> It's writing a test, and running it in a sandbox.
+> Now it's writing a test, and running it.
 
 *Let it run. Say nothing for a few seconds.*
 
----
-
-### 2:28 · Browser — **the fifteen seconds that matter**
+#### The fifteen seconds that matter
 
 *The moment attempt 1 lands green:*
 
@@ -169,56 +195,27 @@ Click **Run** at roughly 2:05 and the stream will land under your narration.
 
 *Do not talk over the retry. Let it appear.*
 
----
-
-### 2:44 · Browser
-
 > Second attempt. **Red.** Now it has proof the bug is real, and proof of what
 > it is.
 
----
-
-### 2:54 · Browser
+#### The patch
 
 > Now — and only now — will it try a patch. It applies the diff and runs pytest
 > twice: the new test, and the whole existing suite.
 >
-> Both green. That's the only way a patch is ever accepted here.
-
----
-
-### 3:14 · Browser
+> Both green. That's the zero you saw on the last slide, being enforced. And that
+> run cost about one and a half cents.
 
 **DO:** Scroll to the client reply.
 
-> And it closes the loop with the person who complained. In her words. No
-> jargon. And marked as a draft — because a person sends it.
+> And it closes the loop with the person who complained. In her words. No jargon.
+> And marked as a draft — because a person sends it.
 
-**Cut to slide 08.**
-
----
-
-### 3:28 · Slide 08
-
-> The number we care about is the false-fix rate. Zero percent — not because we
-> got lucky on nine cases, but because a function refuses the record.
->
-> Three of those nine are supposed to end with no patch at all. And that run cost
-> about one and a half cents.
+**Cut back to the deck, on slide 09.**
 
 ---
 
-### 3:52 · Slide 05
-
-> This is how.
->
-> Six nodes, and the two red loops are the agent. Repro loops when its test
-> passes, because that's evidence it was wrong. Fix loops until both pytest runs
-> are green. Three of the four ways out of this graph end with no patch at all.
-
----
-
-### 4:16 · Slide 10
+### 4:24 · Slide 09
 
 > Next is a GitHub App with webhooks, so the reproduction is waiting when the
 > maintainer opens their laptop.
@@ -228,13 +225,12 @@ Click **Run** at roughly 2:05 and the stream will land under your narration.
 
 ---
 
-### 4:36 · Slide 11
+### 4:44 · Slide 10
 
 > Every other agent will hand you a patch. Ask it to show you the test that
 > failed first.
 >
-> And if you check one thing — open `contracts.py`, line 277. If the invariant is
-> really enforced there, everything else we've told you follows.
+> If you check one thing of ours — `contracts.py`, line 277.
 >
 > Thank you.
 
@@ -245,34 +241,30 @@ Click **Run** at roughly 2:05 and the stream will land under your narration.
 **Read this before you commit to the script above.** The one live Bedrock run we
 have on record (`eval/recorded_runs.json`) reproduced the bug and then had all
 three patch attempts rejected — it ended `REPRODUCED_NOT_FIXED`. The green-badge
-moment at 2:50 is the part of this script the model has to earn, and it may not.
+moment is the part of this script the model has to earn, and it may not.
 
-Rehearse it. If two or three live runs land the fix, use the script above. If
-they don't, keep **everything** up to 2:30 unchanged — the reproduction is the
-product, and it works — and swap 2:50 and 3:10:
+Rehearse it. If two or three live runs land the fix, use the script above. If they
+don't, keep **everything** up to "Second attempt. Red." unchanged — the
+reproduction is the product, and it works — and swap the two beats after it:
 
-> ### 2:50 (alternate)
+> #### The patch (alternate)
 >
 > Now it tries a patch. It applies the diff and runs pytest twice: the new test,
 > and the existing suite.
 >
 > **Rejected.** And again. And a third time. So it stops.
 >
-> This is the whole product in one frame. It had a reproduction, it had a
-> hypothesis, and it still would not hand you a diff that its own evidence
+> That is the false-fix rate staying at zero, in real time. It had a reproduction,
+> it had a hypothesis, and it still would not hand you a diff its own evidence
 > didn't support. Most agents would have shipped one of those three.
 
-> ### 3:10 (alternate)
+> #### The reply (alternate)
 >
 > **DO:** Scroll to the client reply.
 >
 > And it says exactly that to the client. We reproduced your problem, we know
 > where it is, we don't have a safe fix yet. No jargon, and no promise the
 > evidence doesn't support.
-
-Then at 3:30, add one sentence to slide 08 before the rest:
-
-> You just watched the false-fix rate stay at zero in real time.
 
 **Do not re-record until you get a lucky green take and present that as typical.**
 The refusal take is a weaker demo and a stronger pitch, and it is honest.
@@ -281,14 +273,17 @@ The refusal take is a weaker demo and a stronger pitch, and it is honest.
 
 ## Delivery notes
 
-- **The 2:28 beat is the whole video.** Everything before it is setup and
-  everything after is evidence. Slow down there, and do not cut it for time.
+- **The "first test passed" beat is the whole video.** Everything before it is
+  setup and everything after is consequence. Slow down there, and never cut it
+  for time.
 - Narrate the **reasoning**, never the interface. Never say "as you can see here"
   or "this panel shows".
-- If you are running long, cut slide 10 to one sentence. Never cut 07 or the
-  2:28 beat.
+- Slide 07 before the demo is deliberate: you state the number, then the demo
+  proves it. Land "let me show you that zero being enforced" and cut immediately.
+- If you are running long, cut slide 04 to one sentence. Never cut 06, and never
+  cut the failed first attempt.
 - **Let the last slide breathe.** It is deliberately under-written: the
   thirty-six-second quickstart is printed on it for the judges to read, so you
-  do not have to say it. Land the two lines that are there and stop.
-- Read the client email more slowly than feels comfortable. It is the only
-  moment where the audience is meeting the person we built this for.
+  don't have to say it. Land the two lines that are there and stop.
+- Read the client email more slowly than feels comfortable. It is the only moment
+  where the audience meets the person we built this for.
