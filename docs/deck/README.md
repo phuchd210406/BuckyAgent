@@ -1,7 +1,15 @@
-# The ten slides
+# The slides
 
 Task E4 in `tasks/ENGINEER_E.md`. Session 3's sample flow, one message per
 slide, every number carrying its source in the footer rail of the slide itself.
+
+Eleven slides, not ten: "Technical architecture" is split into **05, the agent
+graph** and **06, the guardrails**, because the graph is the slide a technical
+judge reads rather than listens to and it needs the whole canvas. Slide 05 is a
+hand-authored inline SVG redrawing of the diagram in `docs/ARCHITECTURE.md`,
+laid out from `graph/build.py` — `build_graph:352-376` and the three routers —
+so the branches, both self-loops and all three no-patch exits are the ones the
+code actually takes.
 
 **Published (with speaker notes and a present mode):**
 https://claude.ai/code/artifact/2d1d50a5-cd28-4c21-a40e-ee6ad7d842df

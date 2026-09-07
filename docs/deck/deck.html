@@ -378,7 +378,7 @@ body.presenting .pbar { display: flex; }
 
 <header class="topbar">
   <span class="wordmark">Repro<i>.</i></span>
-  <span class="sub">from &ldquo;it&rsquo;s broken&rdquo; to a failing test &middot; 10 slides</span>
+  <span class="sub">from &ldquo;it&rsquo;s broken&rdquo; to a failing test &middot; 11 slides</span>
   <span class="spacer"></span>
   <button class="btn" id="theme">Theme</button>
   <button class="btn btn-primary" id="present">Present</button>
@@ -386,7 +386,7 @@ body.presenting .pbar { display: flex; }
 
 <div class="intro">
   <p>Scroll for the deck with speaker notes, or press <strong>Present</strong> for one slide at a time (&larr; &rarr; to move, Esc to exit). Every figure carries its source in the footer rail.
-  <span class="warn">Two things are still owed before this is final &mdash; slide 2&rsquo;s interview quote and slide 7&rsquo;s live numbers; both are marked in amber on the slide.</span></p>
+  <span class="warn">Two things are still owed before this is final &mdash; slide 2&rsquo;s interview quote and slide 8&rsquo;s live numbers; both are marked in amber on the slide.</span></p>
 </div>
 
 <div class="deck" id="deck">
@@ -510,7 +510,7 @@ body.presenting .pbar { display: flex; }
               <tr><td>The Everyone Problem</td><td>&ldquo;Developers&rdquo; is 30 million people &rarr; one solo maintainer, no QA, client emails them directly.</td></tr>
               <tr><td>The Missing Because</td><td>Asserted &rarr; two citations, both about the <em>reproduction</em> gap specifically.</td></tr>
               <tr><td>The Boiling Ocean</td><td>&ldquo;Fix bugs&rdquo; is the discipline &rarr; one slice: complaint &rarr; red test.</td></tr>
-              <tr class="star"><td>The Solved Problem</td><td>The real danger. Answered in full on slide 6.</td></tr>
+              <tr class="star"><td>The Solved Problem</td><td>The real danger. Answered in full on slide 7.</td></tr>
             </tbody>
           </table>
         </div>
@@ -532,7 +532,7 @@ body.presenting .pbar { display: flex; }
   </article>
   <div class="notes">
     <h4>Speaker notes</h4>
-    <p><span class="crit">PRESENTATION</span><span class="crit">ORIGINALITY</span> One message: <em>we narrowed on purpose, and we can show our working.</em> Do not read the left table row by row &mdash; point at it, say &ldquo;we ran our statement through six failure modes and it survived five; the sixth is slide 6&rdquo;, and spend your time on the right column.</p>
+    <p><span class="crit">PRESENTATION</span><span class="crit">ORIGINALITY</span> One message: <em>we narrowed on purpose, and we can show our working.</em> Do not read the left table row by row &mdash; point at it, say &ldquo;we ran our statement through six failure modes and it survived five; the sixth is slide 7&rdquo;, and spend your time on the right column.</p>
     <p>The right column is the answer to &ldquo;why is this agentic rather than a script?&rdquo;, which is graded separately. All four behaviours are visible in the demo, and the second one is the retry the video must not cut.</p>
   </div>
 </section>
@@ -540,20 +540,122 @@ body.presenting .pbar { display: flex; }
 <!-- ─────────────────────────────── 5 ─────────────────────────────── -->
 <section class="block">
   <article class="slide phase-build">
-    <div class="shead"><span class="snum">05</span><span class="seyebrow">Technical architecture</span></div>
+    <div class="shead"><span class="snum">05</span><span class="seyebrow">Technical architecture &mdash; the graph</span></div>
     <div class="sbody">
-      <h2 class="stitle" style="font-size:3cqw;">Six nodes, every loop bounded in plain Python, four capabilities and no shell.</h2>
-      <div class="flowrow" style="margin-top:1.6cqw;">
-        <div class="node"><span class="nm">INTAKE</span><span class="nd">Complaint &rarr; typed <span class="mono">ReportFacts</span></span></div>
-        <div class="node"><span class="nm">CLARIFY</span><span class="nd">One plain-English question, then the run <em>stops</em>: an edge to END, not a loop</span></div>
-        <div class="node"><span class="nm">LOCALISE</span><span class="nd">BM25 over <em>functions</em> + a git-recency prior &rarr; &le;5 typed hypotheses</span></div>
-        <div class="node loop"><span class="nm">REPRO &orarr;</span><span class="nd">Write a test, <em>run it</em>. Green means we did not reproduce &rarr; revise, &le;3</span></div>
-        <div class="node gate"><span class="nm">FIX &orarr;</span><span class="nd">Patch, then run <em>twice</em>: repro test and the whole existing suite</span></div>
-        <div class="node"><span class="nm">REPORT</span><span class="nd">PR body for the dev, plain reply for the client</span></div>
-      </div>
-      <div class="cols c2" style="margin-top:2cqw;">
+      <h2 class="stitle" style="font-size:2.6cqw;">Two loops, and a branch that ends the run rather than guess.</h2>
+      <figure style="margin:1.2cqw 0 0;">
+        <svg viewBox="0 0 1320 470" role="img" width="100%" style="height:auto; display:block;"
+             aria-label="The Repro agent graph. A prepare step outside the graph clones the repository, copies it to a sandbox and builds a per-run virtualenv. Inside LangGraph: intake either branches down to clarify, which asks one question and ends the run, or forwards to localise, then repro. Repro loops on itself up to three times while the test it writes keeps passing, because a passing test is not a reproduction; once a test fails for the right reason it goes to fix. Fix loops on itself up to three times while the patch fails to make both the repro test and the existing suite green; once both are green it goes to report. Either loop exhausting its three attempts routes to report instead. Report writes the RunRecord, whose invariants are checked before anything leaves the process.">
+          <defs>
+            <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+            </marker>
+            <marker id="ar-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--red)"/>
+            </marker>
+            <marker id="ar-grn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--green)"/>
+            </marker>
+          </defs>
+          <g fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="10" y="140" width="230" height="82" rx="5" stroke-dasharray="5 4" opacity=".55"/>
+            <line x1="240" y1="181" x2="268" y2="181" marker-end="url(#ar)"/>
+
+            <rect x="252" y="56" width="1058" height="310" rx="8" stroke-dasharray="3 5" opacity=".35"/>
+
+            <rect x="274"  y="150" width="120" height="62" rx="4"/>
+            <rect x="494"  y="150" width="130" height="62" rx="4"/>
+            <rect x="724"  y="150" width="124" height="62" rx="4" stroke="var(--red)"   stroke-width="2"/>
+            <rect x="948"  y="150" width="108" height="62" rx="4" stroke="var(--green)" stroke-width="2"/>
+            <rect x="1156" y="150" width="130" height="62" rx="4"/>
+            <rect x="274"  y="258" width="120" height="62" rx="4" stroke-dasharray="5 4"/>
+
+            <line x1="394"  y1="181" x2="488"  y2="181" marker-end="url(#ar)"/>
+            <line x1="624"  y1="181" x2="718"  y2="181" marker-end="url(#ar)"/>
+            <line x1="848"  y1="181" x2="942"  y2="181" stroke="var(--green)" marker-end="url(#ar-grn)"/>
+            <line x1="1056" y1="181" x2="1150" y2="181" stroke="var(--green)" marker-end="url(#ar-grn)"/>
+
+            <line x1="334" y1="212" x2="334" y2="252" stroke-dasharray="5 4" marker-end="url(#ar)"/>
+            <line x1="394" y1="289" x2="438" y2="289" stroke-dasharray="5 4" marker-end="url(#ar)"/>
+
+            <path d="M754,150 L754,118 L818,118 L818,150" stroke="var(--red)" stroke-width="2" marker-end="url(#ar-red)"/>
+            <path d="M972,150 L972,118 L1032,118 L1032,150" stroke="var(--red)" stroke-width="2" marker-end="url(#ar-red)"/>
+
+            <path d="M786,212 L786,340 L1246,340 L1246,218" stroke-dasharray="6 4" opacity=".7" marker-end="url(#ar)"/>
+            <path d="M1002,212 L1002,290 L1216,290 L1216,218" stroke-dasharray="6 4" opacity=".7" marker-end="url(#ar)"/>
+
+            <path d="M1286,181 L1300,181 L1300,386" marker-end="url(#ar)"/>
+            <rect x="252" y="392" width="1058" height="62" rx="4" stroke-width="2"/>
+          </g>
+
+          <g font-family="JetBrains Mono, monospace" fill="currentColor">
+            <text x="22" y="164" font-size="13.5" font-weight="700">PREPARE</text>
+            <text x="22" y="184" font-size="11.5" opacity=".8">clone --depth 1 &#8594; sandbox copy</text>
+            <text x="22" y="201" font-size="11.5" opacity=".8">&#8594; per-run virtualenv</text>
+            <text x="22" y="240" font-size="11" opacity=".62" font-style="italic">not a node: runs before START;</text>
+            <text x="22" y="255" font-size="11" opacity=".62" font-style="italic">nothing on the seam reaches it</text>
+
+            <text x="264" y="46" font-size="12.5" font-weight="700" opacity=".68">LangGraph &#183; typed state, no transcript</text>
+
+            <text x="334"  y="176" font-size="14.5" font-weight="700" text-anchor="middle">intake</text>
+            <text x="334"  y="197" font-size="11" opacity=".7" text-anchor="middle">ReportFacts</text>
+            <text x="559"  y="176" font-size="14.5" font-weight="700" text-anchor="middle">localise</text>
+            <text x="559"  y="197" font-size="11" opacity=".7" text-anchor="middle">&#8804;5 Hypothesis</text>
+            <text x="786"  y="176" font-size="14.5" font-weight="700" text-anchor="middle" fill="var(--red)">repro</text>
+            <text x="786"  y="197" font-size="11" opacity=".8" text-anchor="middle">write test, RUN IT</text>
+            <text x="1002" y="176" font-size="14.5" font-weight="700" text-anchor="middle" fill="var(--green)">fix</text>
+            <text x="1002" y="197" font-size="11" opacity=".8" text-anchor="middle">run TWICE</text>
+            <text x="1221" y="176" font-size="14.5" font-weight="700" text-anchor="middle">report</text>
+            <text x="1221" y="197" font-size="11" opacity=".7" text-anchor="middle">two audiences</text>
+            <text x="334"  y="284" font-size="14.5" font-weight="700" text-anchor="middle">clarify</text>
+            <text x="334"  y="305" font-size="11" opacity=".7" text-anchor="middle">ONE question</text>
+
+            <text x="346" y="238" font-size="11" opacity=".75">confidence &lt; 0.6</text>
+            <text x="346" y="252" font-size="11" opacity=".75">or missing critical</text>
+            <text x="444" y="285" font-size="12" font-weight="700">END</text>
+            <text x="444" y="300" font-size="10.5" opacity=".65">a human answers</text>
+
+            <text x="786"  y="90"  font-size="11" text-anchor="middle" fill="var(--red)">test went GREEN</text>
+            <text x="786"  y="104" font-size="11" text-anchor="middle" fill="var(--red)">&#8658; NOT reproduced &#183; &#8804;3</text>
+            <text x="1002" y="97"  font-size="11" text-anchor="middle" fill="var(--red)">not both green &#183; &#8804;3</text>
+
+            <text x="898"  y="170" font-size="11" text-anchor="middle" fill="var(--green)">reproduced</text>
+            <text x="1106" y="170" font-size="11" text-anchor="middle" fill="var(--green)">accepted</text>
+
+            <text x="1012" y="306" font-size="11" opacity=".75">3 spent &#8594; REPRODUCED_NOT_FIXED</text>
+            <text x="798"  y="332" font-size="11" opacity=".75">3 spent &#8594; NOT_REPRODUCED</text>
+
+            <text x="270"  y="418" font-size="13.5" font-weight="700">RunRecord</text>
+            <text x="270"  y="438" font-size="11.5" opacity=".78">every attempt, both pytest runs, the token bill &#8212; replayable</text>
+            <text x="1292" y="418" font-size="12" font-weight="700" text-anchor="end" fill="var(--green)">check_invariants() == []</text>
+            <text x="1292" y="438" font-size="11" text-anchor="end" opacity=".78">or every patch body is emptied before it leaves the process</text>
+          </g>
+        </svg>
+        <figcaption style="font-size:1.18cqw; color:var(--muted); margin-top:1cqw; line-height:1.45;">
+          <strong style="color:var(--ink)">reproduced</strong> means a test ran and failed for the reported reason; <strong style="color:var(--ink)">accepted</strong> means the repro test went red&rarr;green <em>and</em> the pre-existing suite stayed green. Both are computed from an <span class="mono">ExecutionResult</span>, never asked of the model. Solid arrows are the happy path; the dashed ones are the three ways a run ends with no patch and an honest reply. Not drawn because it applies at every router: <span class="mono">budget_exhausted()</span> is checked first everywhere and sends the run straight to <span class="mono">report</span>.
+        </figcaption>
+      </figure>
+    </div>
+    <div class="src"><b>Every edge and branch above:</b> <span class="mono">graph/build.py</span> &mdash; <span class="mono">build_graph:352&ndash;376</span>, <span class="mono">route_after_intake:135</span>, <span class="mono">route_after_repro:160</span>, <span class="mono">route_after_fix:176</span>. <b>Prepare:</b> <span class="mono">build.py:469</span> + <span class="mono">sandbox/deps.py</span>. <b>Original drawing:</b> <span class="mono">docs/ARCHITECTURE.md</span>.</div>
+  </article>
+  <div class="notes">
+    <h4>Speaker notes</h4>
+    <p><span class="crit">TECHNICAL QUALITY</span> One message: <em>the two red loops are the agent, and everything else is a pipeline.</em> Trace one path with your finger and stop talking &mdash; this slide is read, not narrated.</p>
+    <p>The line to say out loud is the <strong>repro loop</strong>: &ldquo;if the test it just wrote <em>passes</em>, that is not a win, it is evidence the hypothesis was wrong &mdash; so it goes back and tries again, at most three times.&rdquo; A judge who understands that one arrow understands the product.</p>
+    <p>Three of the four routes out of this graph end with no patch: clarify, three spent repro attempts, three spent fix attempts. That is the shape of a system built to decline.</p>
+    <p>If asked how a router decides: it reads the <span class="mono">ExecutionResult</span>, never the model&rsquo;s opinion. <span class="mono">reproduced</span> and <span class="mono">accepted</span> are computed from pytest, and <span class="mono">route_after_intake</span> even re-checks the model&rsquo;s own <span class="mono">missing</span> list against the facts it just filled in &mdash; on one recorded run it named three fields that are not on <span class="mono">ReportFacts</span> at all.</p>
+  </div>
+</section>
+
+<!-- ─────────────────────────────── 6 ─────────────────────────────── -->
+<section class="block">
+  <article class="slide phase-build">
+    <div class="shead"><span class="snum">06</span><span class="seyebrow">Technical architecture &mdash; the guardrails</span></div>
+    <div class="sbody">
+      <h2 class="stitle" style="font-size:2.6cqw;">Bounded in plain Python, and searching for the client&rsquo;s words, not ours.</h2>
+      <div class="cols c2" style="margin-top:1.7cqw;">
         <div>
-          <p style="font-size:1.15cqw; letter-spacing:.13em; text-transform:uppercase; color:var(--muted); font-weight:600; margin-bottom:.8cqw;">Bounds, read by routers &mdash; never by asking the model if it is nearly done</p>
+          <p style="font-size:1.15cqw; letter-spacing:.13em; text-transform:uppercase; color:var(--muted); font-weight:600; margin-bottom:.8cqw;">Bounds, read by routers &mdash; never by the model&rsquo;s opinion</p>
           <div class="bounds">
             <span class="bound">MAX_CLARIFY_ROUNDS = 1</span>
             <span class="bound">MAX_LOCALISE_CANDIDATES = 5</span>
@@ -603,7 +705,7 @@ body.presenting .pbar { display: flex; }
 <!-- ─────────────────────────────── 6 ─────────────────────────────── -->
 <section class="block">
   <article class="slide phase-build">
-    <div class="shead"><span class="snum">06</span><span class="seyebrow">Innovation &amp; uniqueness</span></div>
+    <div class="shead"><span class="snum">07</span><span class="seyebrow">Innovation &amp; uniqueness</span></div>
     <div class="sbody">
       <h2 class="stitle">&ldquo;Doesn&rsquo;t Copilot already do this?&rdquo;</h2>
       <p style="font-size:1.45cqw; margin:1.1cqw 0 1.7cqw; color:var(--muted);">
@@ -646,7 +748,7 @@ body.presenting .pbar { display: flex; }
 <!-- ─────────────────────────────── 7 ─────────────────────────────── -->
 <section class="block">
   <article class="slide phase-green">
-    <div class="shead"><span class="snum">07</span><span class="seyebrow">Benefits &amp; evaluation</span></div>
+    <div class="shead"><span class="snum">08</span><span class="seyebrow">Benefits &amp; evaluation</span></div>
     <div class="sbody">
       <h2 class="stitle" style="font-size:3cqw;">False-fix rate is 0% &mdash; by construction, not by luck.</h2>
       <div class="tiles" style="margin-top:1.5cqw;">
@@ -708,7 +810,7 @@ body.presenting .pbar { display: flex; }
 <!-- ─────────────────────────────── 8 ─────────────────────────────── -->
 <section class="block">
   <article class="slide phase-green">
-    <div class="shead"><span class="snum">08</span><span class="seyebrow">Demo preview</span></div>
+    <div class="shead"><span class="snum">09</span><span class="seyebrow">Demo preview</span></div>
     <div class="sbody">
       <h2 class="stitle" style="font-size:2.7cqw;">The first attempt failing is the most important fifteen seconds we have.</h2>
       <div class="shots" style="margin-top:1.6cqw;">
@@ -740,7 +842,7 @@ body.presenting .pbar { display: flex; }
 <!-- ─────────────────────────────── 9 ─────────────────────────────── -->
 <section class="block">
   <article class="slide phase-green">
-    <div class="shead"><span class="snum">09</span><span class="seyebrow">Roadmap</span></div>
+    <div class="shead"><span class="snum">10</span><span class="seyebrow">Roadmap</span></div>
     <div class="sbody">
       <h2 class="stitle">Three steps, in the order the evidence justifies.</h2>
       <div class="cols c3" style="margin-top:2cqw;">
@@ -774,7 +876,7 @@ body.presenting .pbar { display: flex; }
 <!-- ─────────────────────────────── 10 ────────────────────────────── -->
 <section class="block">
   <article class="slide phase-green">
-    <div class="shead"><span class="snum">10</span><span class="seyebrow">Conclusion</span></div>
+    <div class="shead"><span class="snum">11</span><span class="seyebrow">Conclusion</span></div>
     <div class="sbody" style="display:grid; grid-template-rows:1fr auto; gap:2cqw;">
       <div style="align-self:center;">
         <div class="big" style="font-size:3.9cqw;">Every other agent will hand you a patch.<br>Ask it to show you the test that&nbsp;failed first.</div>
@@ -803,7 +905,7 @@ body.presenting .pbar { display: flex; }
     <h4>Speaker notes</h4>
     <p><span class="crit">PRESENTATION</span><span class="crit">ORIGINALITY</span> The call to action is deliberately a challenge, not a demo request: <em>ask any agent for the test that failed first.</em> It reframes our refusal as the thing to want, and it is what a judge will remember in the corridor.</p>
     <p>End on the last column. Inviting someone to go and check the one function that would falsify the whole pitch is the strongest close available, and it only works because it is true.</p>
-    <p>Time check: if you are over, cut slide 4 to a sentence. Never cut 6 or 7.</p>
+    <p>Time check: if you are over, cut slide 4 to a sentence. Never cut 7 or 8.</p>
   </div>
 </section>
 
