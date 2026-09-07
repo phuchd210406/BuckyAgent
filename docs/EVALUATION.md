@@ -37,17 +37,20 @@ asserts it is empty for every case. A bug in the agent that would ship a wrong
 patch is therefore a **test failure**, not a demo-day surprise.
 
 ### 4. Golden dataset with adversarial cases
-`eval/dataset.yaml`. Eight cases, and the mix is the point:
+`eval/dataset.yaml`. Nine cases, and the mix is the point:
 
-| # | Kind | What it proves |
-|---|---|---|
-| 1–4 | Reproducible bug, vague complaint | The happy path actually works |
-| 5 | Under-specified complaint ("it's broken") | The agent **asks** instead of guessing |
-| 6 | **Not a bug** — the client misunderstood the feature | The agent reports NOT_REPRODUCED instead of inventing a fix |
-| 7 | Bug whose naive fix breaks another test | The suite gate catches the regression |
-| 8 | Bug outside the repo (their own network) | The agent gives up honestly |
+| # | Case | Kind | What it proves |
+|---|---|---|---|
+| 1–5 | `shopcart`, `subscriptions`, `helpdesk`, `expenses`, `leaderboard` | Reproducible bug, vague complaint | The happy path actually works |
+| 6 | `notekeeper-underspecified` | Under-specified complaint ("it's broken") | The agent **asks** instead of guessing |
+| 7 | `delivery-working-days` | **Not a bug** — the client misunderstood the feature | The agent reports NOT_REPRODUCED instead of inventing a fix |
+| 8 | `dashboard-preview-overflow` | Bug whose naive fix breaks another test | The suite gate catches the regression |
+| 9 | `statusboard-client-network` | Bug outside the repo (their own network) | The agent gives up honestly |
 
-Cases 5–8 are worth more than 1–4. Any team can demo a happy path. Showing the
+Six cases are genuinely buggy (1–5 and 8); the other three carry
+`expected_files: []`, because the agent is supposed to produce no patch at all.
+
+Cases 6–9 are worth more than 1–5. Any team can demo a happy path. Showing the
 agent decline to act is what separates "functional" from "technically advanced"
 on the rubric, and it is the whole story for the video's final thirty seconds.
 
@@ -66,7 +69,7 @@ Session 3's "Measuring Performance of Digital AI Agents", instantiated for us.
 |---|---|---|---|
 | 1 | **Schema validation pass rate** | share of `structured()` calls whose first reply validates against the Pydantic model | ≥ 95% |
 | 2 | **Tool-call success rate** | share of sandbox invocations returning a parseable `ExecutionResult` (a *failing test* counts as success — the tool worked) | ≥ 98% |
-| 3 | **Reproduction rate** ⭐ | share of genuinely-buggy cases where a red test was produced | ≥ 6/7 |
+| 3 | **Reproduction rate** ⭐ | share of genuinely-buggy cases where a red test was produced | ≥ 5/6 |
 | 4 | **False-fix rate** ⭐⭐ | share of runs emitting a patch with **no** verified red→green. **This must be 0. It is structurally 0, and the invariant test proves it.** | 0% |
 | 5 | **Loop discipline** | mean repro attempts per case; % of runs hitting the cap | mean ≤ 1.8 |
 | 6 | **Token cost per run** | summed from `usage` on every response, priced from `settings.PRICES` | ≤ $0.03 |
@@ -96,8 +99,11 @@ Then, by hand:
    `NOT_REPRODUCED`. If it invents a plausible-looking patch, stop everything
    and fix that before anything else — it is the one failure that invalidates
    the pitch.
-2. **Regression check.** Manually edit the accepted patch from case 7 to the
-   naive wrong fix. The suite gate must reject it.
+2. **Regression check.** Manually edit the accepted patch from case 8
+   (`dashboard-preview-overflow`) to the naive wrong fix — cutting the preview
+   at exactly `limit`. The suite gate must reject it: it breaks
+   `test_words_are_never_cut_in_half`, which is a genuine pre-existing
+   requirement and not a bad test.
 3. **Cold start.** `git clone` into a fresh directory, `pip install -r
    requirements.txt`, `make test`, `make demo`. Judges run your README. If it
    fails on a clean machine, technical quality is capped at 1 point regardless
