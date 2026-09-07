@@ -17,7 +17,7 @@ sit under it on the same canvas; the seam's seven methods, the pre-call budget
 checks and the full stack are in that slide's speaker notes rather than on it.
 
 **Published (with speaker notes and a present mode):**
-https://claude.ai/code/artifact/2d1d50a5-cd28-4c21-a40e-ee6ad7d842df
+https://claude.ai/code/artifact/2fd02db5-7c8c-43fb-a983-7c21e1850032
 
 `deck.html` is the source. The three `__IMG1__`/`__IMG2__`/`__IMG3__` tokens are
 placeholders for the screenshots, inlined as base64 `data:` URIs at publish time
