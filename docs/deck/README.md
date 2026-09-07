@@ -47,6 +47,28 @@ The committed images are from **rehearsal replay** (`MOCK=1`), which replays the
 recorded shopcart run at its real pacing and calls no model. That is stated on
 the slide. Retake them from a live run before recording the video.
 
+## Where the deck and `docs/ARCHITECTURE.md` disagree, and why the deck is right
+
+The slides were checked line by line against the code. Two things ARCHITECTURE.md
+describes are not built, so the deck does not claim them:
+
+* **Escalating to Sonnet on the final attempt.** Both clients fix their model at
+  construction (`llm/bedrock.py:116`, `llm/anthropic_api.py:59`); nothing anywhere
+  selects `settings.SONNET`, which appears only in `PRICES` and `MODEL_LABELS`.
+  The deck says "one model per run", and slide 5's speaker notes carry a
+  DO NOT CLAIM warning.
+* **Three clarifying questions.** `agents/clarify.py:48` asks for one
+  `ClarifyingQuestion` and returns `{"questions": [question]}`. The module's own
+  docstring flags the divergence and leaves the choice to the lead. The deck says
+  one question.
+
+Either fix the doc or build the feature — but until one of those happens, the
+slides match the code and the doc does not.
+
+Two more corrections made in the same pass: the sandbox seam is **seven** methods
+expressing four capabilities (`graph/sandbox_seam.py:85-98`), not four methods;
+and `RunRecord` is at `contracts.py:260`.
+
 ## Two things still owed before this deck is final
 
 1. **Slide 2's interview quote.** `docs/PROBLEM_STATEMENT.md` says the two
