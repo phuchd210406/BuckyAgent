@@ -1,0 +1,60 @@
+# The ten slides
+
+Task E4 in `tasks/ENGINEER_E.md`. Session 3's sample flow, one message per
+slide, every number carrying its source in the footer rail of the slide itself.
+
+**Published (with speaker notes and a present mode):**
+https://claude.ai/code/artifact/2d1d50a5-cd28-4c21-a40e-ee6ad7d842df
+
+`deck.html` is the source. The three `__IMG1__`/`__IMG2__`/`__IMG3__` tokens are
+placeholders for the screenshots, inlined as base64 `data:` URIs at publish time
+because the artifact CSP blocks external images:
+
+```bash
+python3 - <<'PY'
+import base64, pathlib
+html = pathlib.Path("docs/deck/deck.html").read_text()
+for token, path in {
+    "__IMG1__": "docs/deck/screenshots/01-first-repro-attempt-failed.png",
+    "__IMG2__": "docs/deck/screenshots/02-two-green-badges.png",
+    "__IMG3__": "docs/deck/screenshots/03-client-reply.png",
+}.items():
+    raw = pathlib.Path(path).read_bytes()
+    html = html.replace(token, "data:image/png;base64," + base64.b64encode(raw).decode())
+pathlib.Path("/tmp/deck-inlined.html").write_text(html)
+PY
+```
+
+Open the result in a browser, or print to PDF — the print stylesheet puts one
+slide per page.
+
+## The screenshots
+
+`screenshots/capture.mjs` drives the running UI in headless Chrome over the
+DevTools protocol and captures the three moments slide 8 needs. No dependencies:
+Node 24 ships a global `WebSocket`.
+
+```bash
+MOCK=1 REPRO_MOCK_SPEED=0.2 REPRO_CORS_ORIGINS=http://localhost:5199 \
+  PYTHONPATH=src .venv/bin/python -m uvicorn repro.api.main:app --port 8010 &
+cd web && VITE_API_BASE=http://127.0.0.1:8010 npx vite --port 5199 &
+google-chrome --headless=new --remote-debugging-port=9333 \
+  --user-data-dir=/tmp/deck-chrome --window-size=1440,1000 about:blank &
+node docs/deck/screenshots/capture.mjs /tmp/shots
+```
+
+The committed images are from **rehearsal replay** (`MOCK=1`), which replays the
+recorded shopcart run at its real pacing and calls no model. That is stated on
+the slide. Retake them from a live run before recording the video.
+
+## Two things still owed before this deck is final
+
+1. **Slide 2's interview quote.** `docs/PROBLEM_STATEMENT.md` says the two
+   interviews have not happened. The slide carries an amber box with the exact
+   question to ask rather than an invented quote. If the interviews do not
+   happen, cut the box — do not fill it.
+2. **Slide 7's live numbers.** The six-metric table is scored over the committed
+   `RunRecord` fixtures, and `eval/results.md` says in as many words not to put
+   that table on a slide as though it were measured. The slide says so too, and
+   names the one figure that *is* measured — $0.014147, from
+   `eval/recorded_runs.json`. Run `make eval-live` and replace the table.
