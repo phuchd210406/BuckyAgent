@@ -84,7 +84,7 @@ Only Engineer C, and only while recording cassettes, should have `REPRO_RECORD=1
 export AWS_ACCESS_KEY_ID=...      # fresh from the access portal
 export AWS_SECRET_ACCESS_KEY=...
 export AWS_SESSION_TOKEN=...
-REPRO_RECORD=1 LLM_PROVIDER=bedrock make record
+make record                      # Bedrock; or: make record PROVIDER=anthropic
 git add src/repro/llm/cassettes && git commit -m "record cassettes"
 ```
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Record cassettes from a real Bedrock run of the golden dataset. OWNER: Engineer C (C4).
 
-    REPRO_RECORD=1 LLM_PROVIDER=bedrock make record        # COSTS MONEY
+    make record                          # Bedrock          COSTS MONEY
+    make record PROVIDER=anthropic       # Anthropic API    COSTS MONEY
 
 Runs every case in eval/dataset.yaml end to end against real Bedrock -- real
 workspace, real pytest, real patcher -- and writes:
@@ -76,6 +77,17 @@ def report_for(case: dict):
     )
 
 
+def new_client(provider: str, budget):
+    """A real client for one case. Both carry the per-run budget guard."""
+    if provider == "anthropic":
+        from repro.llm.anthropic_api import AnthropicLLM
+
+        return AnthropicLLM(budget=budget)
+    from repro.llm.bedrock import BedrockLLM
+
+    return BedrockLLM(budget=budget)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
@@ -84,6 +96,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--session-budget", type=float, default=0.50,
                     help="Hard stop for the whole recording, in USD (default 0.50).")
     ap.add_argument("--dry-run", action="store_true", help="List what would be recorded.")
+    ap.add_argument(
+        "--provider",
+        choices=("bedrock", "anthropic"),
+        default=None,
+        help="Which real model to record from (default: LLM_PROVIDER, else bedrock).",
+    )
     args = ap.parse_args(argv)
 
     note = load_env()
@@ -95,11 +113,15 @@ def main(argv: list[str] | None = None) -> int:
 
     from repro.contracts import MAX_RUN_USD
     from repro.graph.build import run
-    from repro.llm.bedrock import BedrockLLM, RecordingLLM
+    from repro.llm.bedrock import RecordingLLM
     from repro.llm.budget import BudgetExceeded, BudgetGuard, session_guard
     from repro.settings import settings
 
     cfg = settings()
+    provider = args.provider or os.environ.get("LLM_PROVIDER", "").strip().lower()
+    if provider not in ("bedrock", "anthropic"):
+        provider = "bedrock"
+    model_id = cfg.anthropic_model_id if provider == "anthropic" else cfg.model_id
     cases = yaml.safe_load(args.dataset.read_text())["cases"]
     if args.case:
         cases = [c for c in cases if c["id"] in set(args.case)]
@@ -109,7 +131,8 @@ def main(argv: list[str] | None = None) -> int:
 
     cassette_dir = REPO_ROOT / cfg.cassette_dir
     print(f"config     {note}")
-    print(f"model      {cfg.model_id}   region {cfg.region}")
+    where = "Anthropic API" if provider == "anthropic" else f"Bedrock, region {cfg.region}"
+    print(f"model      {model_id}   via {where}")
     print(f"cassettes  {cassette_dir}")
     print(f"budget     ${MAX_RUN_USD:.2f}/run, ${args.session_budget:.2f} for this session")
     print(f"cases      {len(cases)}: {', '.join(c['id'] for c in cases)}\n")
@@ -123,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
 
     for case in cases:
         report = report_for(case)
-        client = BedrockLLM(budget=BudgetGuard(label=report.run_id))
+        client = new_client(provider, BudgetGuard(label=report.run_id))
         llm = RecordingLLM(client, cassette_dir=cassette_dir, enabled=True)
 
         started = time.monotonic()
@@ -164,10 +187,17 @@ def main(argv: list[str] | None = None) -> int:
             "usd": round(cost, 6),
         })
 
+    if records and all(r["error"] for r in records):
+        # Nothing was recorded, so the manifest the replay tests read would be
+        # replaced by one that lists only failures. Keep the old one.
+        print(f"\nevery case failed: {args.out} left as it was")
+        return 1
+
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps({
-        "model_id": cfg.model_id,
-        "region": cfg.region,
+        "model_id": model_id,
+        "provider": provider,
+        "region": cfg.region if provider == "bedrock" else None,
         "recorded_at": RECORDED_AT.isoformat(),
         "total_usd": round(spent, 6),
         "runs": records,

@@ -48,8 +48,9 @@ ifndef REPO
 endif
 	$(PY) -m repro.cli run --repo-url "$(REPO)" --report "$(REPORT)" -v
 
-record:                   ## Re-record cassettes against real Bedrock (COSTS MONEY)
-	REPRO_RECORD=1 LLM_PROVIDER=bedrock $(PY) scripts/record_cassettes.py
+PROVIDER ?= bedrock
+record:                   ## Re-record cassettes (COSTS MONEY). PROVIDER=anthropic for an API key
+	REPRO_RECORD=1 LLM_PROVIDER=$(PROVIDER) $(PY) scripts/record_cassettes.py --provider $(PROVIDER)
 
 eval:                     ## Score the golden dataset by RUNNING the agent (free, replayed)
 	LLM_PROVIDER=fake $(PY) eval/run_eval.py --dataset eval/dataset.yaml
