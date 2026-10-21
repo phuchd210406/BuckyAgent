@@ -1,0 +1,1315 @@
+From 56c5b5e326337271d1a0fc1f289cb6909a1b79f9 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 21 Oct 2026 14:39:03 +0800
+Subject: [PATCH] fix(agents): show repro and fix the real code, and judge them
+ on real evidence
+
+On real repositories Repro could reproduce but never fix. Three causes:
+
+1. Neither node was shown the source. repro guessed signatures, and fix
+   wrote diffs against a file it had never seen, so git refused them.
+   - New sandbox action read_source(): one .py file, capped at 8000 chars,
+     never a secret file, never outside the workspace.
+   - repro and fix now get `source` for up to two suspected files.
+
+2. A test that failed on its own mistake counted as a reproduction.
+   pytest reports a TypeError from a wrong call as "1 failed", the same
+   as a real assertion.
+   - broken_test_reason() flags NameError/ImportError, signature
+     TypeErrors and invented module attributes raised in the test file's
+     own frame. The same errors raised inside project code still count.
+   - The team's own recorded shopcart run was such a case:
+     shipping_for(discount=...). It is rescored not_reproduced in
+     eval/recorded_runs.json, with the original verdict kept.
+
+3. fix was never told why its last diff was rejected.
+   - The reasoning now says "The patch was not applied (<git's message>)".
+   - The next attempt gets the evidence: git's error, or the red output.
+
+Also:
+- Generated tests that did not reproduce are removed. Left in tests/,
+  they kept the suite red and vetoed every patch.
+- The agent may not overwrite the project's own tests.
+- git apply --recount: miscounted @@ headers no longer reject a diff.
+- reporter keeps the verdict when the letters cannot be written.
+- Pin anthropic<1: 1.x removed `temperature` from messages.create.
+- The TestArtifact cassette was re-keyed, not re-recorded (marked in the
+  file). Run `make record` to refresh the cassettes.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01KGsvdpLJ4ZoDJvjm8iGWHZ
+---
+ docs/ARCHITECTURE.md                          |   9 +-
+ eval/recorded_runs.json                       |   4 +-
+ requirements.txt                              |   2 +-
+ src/repro/agents/_common.py                   | 134 ++++-
+ src/repro/agents/fix.py                       |  94 +++-
+ src/repro/agents/reporter.py                  |  37 +-
+ src/repro/agents/repro_agent.py               |  59 ++-
+ src/repro/graph/sandbox_seam.py               |  84 +++-
+ src/repro/llm/cassettes/e2fbd6456452e71e.json |  16 +
+ src/repro/sandbox/patcher.py                  |   5 +-
+ tests/test_show_code_to_model.py              | 470 ++++++++++++++++++
+ 11 files changed, 845 insertions(+), 69 deletions(-)
+ create mode 100644 src/repro/llm/cassettes/e2fbd6456452e71e.json
+ create mode 100644 tests/test_show_code_to_model.py
+
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index 4e5632e..fa47aaa 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -80,10 +80,15 @@ Straight from Session 3's "Building Agents That Hold Up":
+    the model's opinion about whether it is nearly done.
+ 3. **Descriptions are the interface** — every `Field(description=...)` in
+    `contracts.py` is prompt text. Review them as prompts.
+-4. **Keep payloads small** — the model never sees a whole file. `search()`
++4. **Keep payloads small** — nothing reaches the model uncapped. `search()`
+    returns capped snippets; `ExecutionResult` carries tails only
+    (`SANDBOX_MAX_OUTPUT_CHARS = 4000`), because a pytest traceback dump would be
+-   re-read on every subsequent turn of the loop.
++   re-read on every subsequent turn of the loop. The one exception is
++   deliberate: `repro` and `fix` are shown the source of at most two suspected
++   `.py` files (`read_source`, capped at `SOURCE_MAX_CHARS = 8000` each). A
++   test written without seeing the code guesses its signatures, and a diff
++   written without seeing it has context lines that do not exist; on real
++   repositories both failed every attempt.
+ 
+ ## Guardrails
+ 
+diff --git a/eval/recorded_runs.json b/eval/recorded_runs.json
+index 19bf3a4..6dd5170 100644
+--- a/eval/recorded_runs.json
++++ b/eval/recorded_runs.json
+@@ -8,6 +8,7 @@
+       "case_id": "shopcart-free-shipping",
+       "error": null,
+       "expected_verdict": "reproduced_and_fixed",
++      "recorded_verdict": "reproduced_not_fixed",
+       "report": {
+         "channel": "email",
+         "raw_text": "hi, i tried to buy stuff this morning and it charged me postage even though the site says free postage over $50. my basket was definitely more than $50. can you sort it out, we have customers complaining",
+@@ -16,8 +17,9 @@
+         "reporter_name": null,
+         "run_id": "shopcart-free-shipping"
+       },
++      "rescored_note": "Recorded as reproduced_not_fixed. Its only 'reproduction' called shipping_for(subtotal=55.0, discount=5.50), and shipping_for takes no discount: the test failed with TypeError on its own mistake. agents._common.broken_test_reason now scores that as a broken test, so replaying the same replies gives not_reproduced. The TestArtifact cassette was re-keyed, not re-recorded; the Handover was dropped because its letter was written for the old verdict. Run `make record` to replace both.",
+       "usd": 0.014147,
+-      "verdict": "reproduced_not_fixed"
++      "verdict": "not_reproduced"
+     }
+   ],
+   "total_usd": 0.014147
+diff --git a/requirements.txt b/requirements.txt
+index 1ea0ab5..342a098 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -4,7 +4,7 @@ pydantic>=2.7,<3
+ # The first-party Claude client (LLM_PROVIDER=anthropic). Imported lazily, so
+ # the fake and Bedrock paths do not need it -- but a real run without an AWS
+ # lease does, and that is the common case on a laptop.
+-anthropic>=0.40
++anthropic>=0.40,<1  # 1.x dropped `temperature` from messages.create, which llm/anthropic_api.py passes
+ langgraph>=0.2.28
+ langchain-core>=0.3
+ boto3>=1.34
+diff --git a/src/repro/agents/_common.py b/src/repro/agents/_common.py
+index df72d44..42bea41 100644
+--- a/src/repro/agents/_common.py
++++ b/src/repro/agents/_common.py
+@@ -7,7 +7,9 @@ no node can quietly disagree with another about what counts as a reproduction.
+ from __future__ import annotations
+ 
+ import json
++import re
+ from functools import lru_cache
++from pathlib import PurePosixPath
+ from typing import Any
+ 
+ from pydantic import BaseModel
+@@ -23,6 +25,11 @@ from repro.contracts import (
+ from repro.graph.state import GraphState
+ from repro.llm.base import SchemaValidationError
+ 
++#: At most this many distinct suspected files are shown to the model. The
++#: localiser's first guess is usually right; the second covers the case where
++#: it named the caller and the bug lives one file over.
++MAX_SOURCE_FILES = 2
++
+ #: Fields of ClientReport that change on every run and mean nothing to the
+ #: model. They are stripped from every prompt because FakeLLM keys cassettes on
+ #: a hash of the exact prompt text: leave a uuid and a timestamp in there and
+@@ -53,8 +60,9 @@ def payload(**parts: Any) -> str:
+     """Render the state slices a node needs as JSON for the user turn.
+ 
+     Engineer C owns how a prompt READS; this owns only what data it carries.
+-    Keep the parts small -- ARCHITECTURE.md rule 4: the model never sees a
+-    whole file, and anything put in here is re-read on every turn of a loop.
++    Keep the parts small -- ARCHITECTURE.md rule 4: nothing goes in uncapped
++    (source excerpts included), and anything put in here is re-read on every
++    turn of a loop.
+     """
+     return json.dumps({key: _plain(value) for key, value in parts.items()}, default=str)
+ 
+@@ -70,6 +78,35 @@ def _plain(value: Any) -> Any:
+     return value
+ 
+ 
++def source_excerpts(sandbox: Any, hypotheses: list[Any], *, max_files: int = MAX_SOURCE_FILES) -> list[dict]:
++    """The real code of the suspected files: [{"path", "code"}], capped.
++
++    Without this the repro node writes tests against signatures it has to
++    guess, and the fix node writes diffs against a file it has never seen --
++    so the test fails with a TypeError and the diff's context lines do not
++    exist. Each file is capped by the sandbox (SOURCE_MAX_CHARS).
++
++    A sandbox without `read_source` (an older test double) simply yields no
++    excerpts: the prompt is poorer, the run still goes ahead.
++    """
++    read = getattr(sandbox, "read_source", None)
++    if read is None:
++        return []
++    excerpts: list[dict] = []
++    seen: set[str] = set()
++    for hypothesis in hypotheses or []:
++        path = (getattr(hypothesis, "file_path", "") or "").strip()
++        if not path or path in seen:
++            continue
++        seen.add(path)
++        code = read(path)
++        if code:
++            excerpts.append({"path": path, "code": code})
++        if len(excerpts) >= max_files:
++            break
++    return excerpts
++
++
+ def add_usage(state: GraphState, *responses: LLMResponse) -> TokenUsage:
+     """This node's spend, added to the run's. The graph re-checks it either way."""
+     total = state.get("usage") or TokenUsage()
+@@ -78,20 +115,96 @@ def add_usage(state: GraphState, *responses: LLMResponse) -> TokenUsage:
+     return total
+ 
+ 
++#: `tests/test_x.py:12: in test_name` -- one frame of pytest's --tb=short output.
++_FRAME_RE = re.compile(r"^(?P<path>\S[^:]*\.py):(?P<line>\d+): in \S+")
++#: `E   TypeError: total() got an unexpected keyword argument 'promo'`
++_EXCEPTION_RE = re.compile(r"^E\s+(?P<type>[A-Za-z_][\w.]*):\s?(?P<message>.*)$")
++
++#: Exceptions that, raised from the test's own code, mean the TEST is wrong.
++_ALWAYS_BROKEN = frozenset(
++    {"NameError", "UnboundLocalError", "ImportError", "ModuleNotFoundError", "SyntaxError"}
++)
++#: A TypeError is only the test's fault when it is a call-signature mismatch:
++#: the test called the project's code with arguments it does not take.
++_SIGNATURE_MISMATCH_RE = re.compile(
++    r"unexpected keyword argument"
++    r"|missing \d+ required (?:positional|keyword-only) arguments?"
++    r"|takes (?:from \d+ to )?\d+ positional arguments? but \d+ (?:were|was) given"
++    r"|takes no arguments"
++    r"|got multiple values for argument"
++    r"|got some positional-only arguments passed as keyword arguments"
++)
++#: An AttributeError is only the test's fault when it names something the
++#: project's module or class does not have, i.e. the test invented an API.
++_MISSING_API_RE = re.compile(r"^(?:module|type object) '[^']+' has no attribute")
++
++
++def _is_test_file(path: str) -> bool:
++    pure = PurePosixPath(path.replace("\\", "/"))
++    return "tests" in pure.parts or "test" in pure.parts or pure.name.startswith("test_")
++
++
++def broken_test_reason(result: ExecutionResult) -> str | None:
++    """Why a FAILING test is the test's fault rather than the bug's, or None.
++
++    pytest counts a test that calls `total(lines, promo=...)` on a function
++    that takes no `promo` as "1 failed", exactly like a real assertion failure.
++    It is not a reproduction: it proves the test was written against an API
++    that does not exist, and a fix "verified" against it fixes nothing.
++
++    The rule is narrow on purpose. The exception must be raised in the TEST
++    file's own frame (the deepest frame pytest shows), and must be one that
++    only a wrong test produces there: an undefined name, a failed import, a
++    call-signature mismatch, or a module/class attribute that does not exist.
++    The same TypeError raised inside the project's code is the bug, and counts.
++    """
++    deepest: str | None = None
++    for line in result.stdout_tail.splitlines():
++        frame = _FRAME_RE.match(line)
++        if frame:
++            deepest = frame.group("path")
++            continue
++        if line.startswith("____"):
++            deepest = None  # a new failure's section begins
++            continue
++        exc = _EXCEPTION_RE.match(line)
++        if not exc or deepest is None:
++            continue
++        frame_path, deepest = deepest, None  # judge each failure once
++        if not _is_test_file(frame_path):
++            continue
++        name = exc.group("type").rsplit(".", 1)[-1]
++        message = exc.group("message").strip()
++        if (
++            name in _ALWAYS_BROKEN
++            or (name == "TypeError" and _SIGNATURE_MISMATCH_RE.search(message))
++            or (name == "AttributeError" and _MISSING_API_RE.match(message))
++        ):
++            return f"{name}: {message}"[:300]
++    return None
++
++
+ def is_reproduction(result: ExecutionResult) -> bool:
+-    """True only when the test RAN and FAILED.
++    """True only when the test RAN and FAILED because of the code, not itself.
+ 
+-    The three ways this is False are all different, and conflating them is how a
++    The four ways this is False are all different, and conflating them is how a
+     patch gets accepted for a bug nobody ever saw:
+       * the test passed        -> the reported behaviour did not happen;
+       * the test errored       -> it never ran (import or collection error);
+-      * the test timed out     -> we know nothing at all.
++      * the test timed out     -> we know nothing at all;
++      * the test is broken     -> it failed on its own mistake, e.g. it called
++                                  a function with arguments it does not take.
+     """
+-    return not result.timed_out and result.errors == 0 and result.failed > 0
++    return (
++        not result.timed_out
++        and result.errors == 0
++        and result.failed > 0
++        and broken_test_reason(result) is None
++    )
+ 
+ 
+ def why_not_reproduced(result: ExecutionResult) -> str:
+-    """One audit-trail line naming which of the three cases this was."""
++    """One audit-trail line naming which of the four cases this was."""
+     if result.timed_out:
+         return "The test did not finish inside the sandbox timeout, so it proves nothing."
+     if result.errors:
+@@ -99,6 +212,13 @@ def why_not_reproduced(result: ExecutionResult) -> str:
+             "The test errored before it could run (import or collection error). "
+             "That is a broken test, not a reproduction of the client's bug."
+         )
++    broken = broken_test_reason(result) if result.failed else None
++    if broken:
++        return (
++            f"The test failed on its own mistake ({broken}), raised in the test file itself. "
++            "It uses the project's code wrongly, so it is a broken test, not a reproduction. "
++            "Check the real signatures in `source`."
++        )
+     if result.failed:
+         return f"The test ran and failed ({result.failed} failed): the reported behaviour occurred."
+     return "The test ran and passed, so the behaviour the client described did not occur."
+diff --git a/src/repro/agents/fix.py b/src/repro/agents/fix.py
+index 35e57ca..eabe3e3 100644
+--- a/src/repro/agents/fix.py
++++ b/src/repro/agents/fix.py
+@@ -1,7 +1,7 @@
+ """Node: fix. OWNER: Engineer A (orchestration) + Engineer C (prompt bodies)."""
+ from __future__ import annotations
+ 
+-from repro.agents._common import add_usage, errored, model_failures, payload
++from repro.agents._common import add_usage, errored, model_failures, payload, source_excerpts
+ from repro.contracts import MAX_FIX_ATTEMPTS, ExecutionResult, FixAttempt, Patch
+ from repro.graph.sandbox_seam import Sandbox, require_sandbox
+ from repro.graph.state import GraphState
+@@ -10,17 +10,17 @@ from repro.llm.base import LLMClient
+ SYSTEM_PROMPT = """\
+ Write the smallest patch that makes the failing test pass.
+ 
+-unified_diff must apply with `git apply` from the repo root: a/ and b/ prefixes, real context lines.
++unified_diff must apply with `git apply` from the repo root: a/ and b/ prefixes, context and `-` lines copied exactly from `source`. If git refused your last diff, rebuild it from `source`.
+ 
+ Never:
+ - change the test file, or any test, in any way;
+ - weaken an assertion, delete a test, or mark one skip/xfail;
+ - wrap the symptom in try/except, or special-case the failing input;
+-- reformat, rename or tidy anything the fix does not require.
++- reformat, rename or tidy anything the fix does not need.
+ 
+-Fix the cause, in the fewest lines that do it. If the only correct fix would require changing an existing test, return an empty unified_diff and use rationale to name that test and say why. That is a design decision for a human, not for you.
++Fix the cause, in the fewest lines. If the only correct fix would change an existing test, return an empty unified_diff and name that test in rationale. That is a design decision for a human, not for you.
+ 
+-Example rationale: "shipping_for was called with the post-promo subtotal, so a $55 basket with SAVE10 dropped under the $50 threshold. total() now passes the pre-discount subtotal, leaving the discount on goods only."
++Example rationale: "shipping_for got the post-promo subtotal, so a $55 basket with SAVE10 fell under the $50 threshold. total() now passes the pre-discount one."
+ """
+ 
+ #: A whole unified diff, JSON-escaped.
+@@ -34,19 +34,22 @@ def fix_node(state: GraphState, llm: LLMClient, *, sandbox: Sandbox | None = Non
+     reproduced = [a for a in attempts if a.reproduced]
+     target_path = reproduced[-1].test.path if reproduced else ""
+ 
++    hypotheses = state.get("hypotheses", [])
++    parts: dict = {
++        "facts": state.get("facts"),
++        "hypotheses": hypotheses,
++        "failing_test": reproduced[-1].test if reproduced else None,
++        "failure": reproduced[-1].result.stdout_tail if reproduced else "",
++        "rejected": [_rejected(f) for f in state.get("fix_attempts", [])[-1:]],
++    }
++    source = source_excerpts(box, hypotheses)
++    if source:
++        parts["source"] = source
++
+     try:
+         patch, response = llm.structured(
+             system=SYSTEM_PROMPT,
+-            user=payload(
+-                facts=state.get("facts"),
+-                hypotheses=state.get("hypotheses", []),
+-                failing_test=reproduced[-1].test if reproduced else None,
+-                failure=reproduced[-1].result.stdout_tail if reproduced else "",
+-                rejected=[
+-                    {"rationale": f.patch.rationale, "reasoning": f.reasoning}
+-                    for f in state.get("fix_attempts", [])[-1:]
+-                ],
+-            ),
++            user=payload(**parts),
+             max_tokens=MAX_TOKENS,
+             schema=Patch,
+         )
+@@ -54,9 +57,9 @@ def fix_node(state: GraphState, llm: LLMClient, *, sandbox: Sandbox | None = Non
+         # One spent attempt, workspace untouched: nothing was applied.
+         return _no_usable_patch(state, exc)
+ 
+-    target_test, suite = _verify(box, patch, target_path)
++    target_test, suite, problem = _verify(box, patch, target_path)
+     # The product's safety property. There is no other route to True.
+-    accepted = target_test.green and suite.green
++    accepted = problem is None and target_test.green and suite.green
+ 
+     return {
+         "fix_attempts": [
+@@ -67,29 +70,58 @@ def fix_node(state: GraphState, llm: LLMClient, *, sandbox: Sandbox | None = Non
+                 target_test=target_test,
+                 suite=suite,
+                 accepted=accepted,
+-                reasoning=_reasoning(target_test, suite, accepted),
++                reasoning=_reasoning(target_test, suite, accepted, problem),
+             )
+         ],
+         "usage": add_usage(state, response),
+     }
+ 
+ 
+-def _verify(box: Sandbox, patch: Patch, target_path: str) -> tuple[ExecutionResult, ExecutionResult]:
+-    """Apply, run both, and leave the workspace as we found it unless it worked."""
++#: How much of a rejected attempt's evidence goes back to the model.
++REJECTED_OUTPUT_CHARS = 1500
++
++
++def _rejected(attempt: FixAttempt) -> dict:
++    """What the model needs to know about its last, rejected patch.
++
++    `reasoning` alone said only "it did not work". When git refused the diff,
++    git's own message (which file, which line) is what lets the next diff be
++    right, so the evidence goes back with it: the failure output of the check
++    that went red, or the refusal itself.
++    """
++    failing = attempt.target_test if not attempt.target_test.green else attempt.suite
++    evidence = failing.stdout_tail or failing.stderr_tail
++    return {
++        "rationale": attempt.patch.rationale,
++        "reasoning": attempt.reasoning,
++        "evidence": evidence[-REJECTED_OUTPUT_CHARS:],
++    }
++
++
++def _verify(
++    box: Sandbox, patch: Patch, target_path: str
++) -> tuple[ExecutionResult, ExecutionResult, str | None]:
++    """Apply, run both, and leave the workspace as we found it unless it worked.
++
++    The third value names why nothing was tested at all (no target, a diff that
++    would not apply, a refused path), or is None when both checks really ran.
++    """
+     if not target_path:
+         # An empty target is not "run the repro test", it is "run the entire
+         # suite" as far as pytest is concerned -- which would let a patch be
+         # accepted having never been checked against the bug it claims to fix.
+-        refused = errored("no reproduced test to verify against; a patch cannot be accepted")
+-        return refused, refused
++        problem = "There is no reproduced test to verify against, so a patch cannot be accepted."
++        refused = errored(problem)
++        return refused, refused, problem
+ 
+     applied = False
+     try:
+         applied, message = box.apply_patch(patch)
+         if not applied:
+             # A diff that will not apply is a failed attempt, not an exception.
++            problem = f"The patch was not applied ({(message or 'patch did not apply')[:500]})."
+             result = errored(message or "patch did not apply")
+-            return result, result
++            return result, result, problem
+ 
+         target_test = box.run_test(target_path)
+         suite = box.run_suite()
+@@ -98,16 +130,24 @@ def _verify(box: Sandbox, patch: Patch, target_path: str) -> tuple[ExecutionResu
+         # That is one spent attempt, not a crashed run.
+         if applied:
+             box.revert_patch(patch)
+-        result = errored(f"The sandbox refused this patch: {exc}")
+-        return result, result
++        problem = f"The sandbox refused this patch: {exc}"
++        result = errored(problem)
++        return result, result, problem
+ 
+     if not (target_test.green and suite.green):
+         # Otherwise attempt N+1 would be written against a half-patched repo.
+         box.revert_patch(patch)
+-    return target_test, suite
++    return target_test, suite, None
+ 
+ 
+-def _reasoning(target_test: ExecutionResult, suite: ExecutionResult, accepted: bool) -> str:
++def _reasoning(
++    target_test: ExecutionResult,
++    suite: ExecutionResult,
++    accepted: bool,
++    problem: str | None = None,
++) -> str:
++    if problem:
++        return f"{problem} Nothing was tested, so nothing was fixed."
+     if accepted:
+         return "The repro test went green and the existing suite stayed green."
+     if not target_test.green and not suite.green:
+diff --git a/src/repro/agents/reporter.py b/src/repro/agents/reporter.py
+index bdee9ae..9787370 100644
+--- a/src/repro/agents/reporter.py
++++ b/src/repro/agents/reporter.py
+@@ -1,7 +1,7 @@
+ """Node: reporter. OWNER: Engineer A (orchestration) + Engineer C (prompt bodies)."""
+ from __future__ import annotations
+ 
+-from repro.agents._common import add_usage, payload, verdict_for
++from repro.agents._common import add_usage, model_failures, payload, verdict_for
+ from repro.contracts import Handover
+ from repro.graph.state import GraphState
+ from repro.llm.base import LLMClient
+@@ -27,19 +27,26 @@ def reporter_node(state: GraphState, llm: LLMClient) -> dict:
+     repro_attempts = state.get("repro_attempts", [])
+     accepted = [f for f in state.get("fix_attempts", []) if f.accepted]
+ 
+-    handover, response = llm.structured(
+-        system=SYSTEM_PROMPT,
+-        user=payload(
+-            report=state["report"],
+-            facts=state.get("facts"),
+-            verdict=verdict.value,
+-            # Tails and rationales only: the diff itself goes in the PR, not the prompt.
+-            reproduced_by=[a.test.path for a in repro_attempts if a.reproduced],
+-            attempts={"repro": len(repro_attempts), "fix": len(state.get("fix_attempts", []))},
+-            fix=[{"files": f.patch.files_touched, "rationale": f.patch.rationale} for f in accepted],
+-        ),
+-        max_tokens=MAX_TOKENS,
+-        schema=Handover,
+-    )
++    try:
++        handover, response = llm.structured(
++            system=SYSTEM_PROMPT,
++            user=payload(
++                report=state["report"],
++                facts=state.get("facts"),
++                verdict=verdict.value,
++                # Tails and rationales only: the diff itself goes in the PR, not the prompt.
++                reproduced_by=[a.test.path for a in repro_attempts if a.reproduced],
++                attempts={"repro": len(repro_attempts), "fix": len(state.get("fix_attempts", []))},
++                fix=[{"files": f.patch.files_touched, "rationale": f.patch.rationale} for f in accepted],
++            ),
++            max_tokens=MAX_TOKENS,
++            schema=Handover,
++        )
++    except model_failures():
++        # The verdict is decided above, in Python, from the evidence; only the
++        # letters are the model's. A reply it could not produce (truncated, off
++        # schema, an unrecorded cassette) must not throw away a finished run's
++        # verdict. No letters is the same outcome as an invariant violation.
++        return {"verdict": verdict, "handover": None, "usage": add_usage(state)}
+ 
+     return {"verdict": verdict, "handover": handover, "usage": add_usage(state, response)}
+diff --git a/src/repro/agents/repro_agent.py b/src/repro/agents/repro_agent.py
+index 4151cc9..264f21b 100644
+--- a/src/repro/agents/repro_agent.py
++++ b/src/repro/agents/repro_agent.py
+@@ -7,6 +7,7 @@ from repro.agents._common import (
+     is_reproduction,
+     model_failures,
+     payload,
++    source_excerpts,
+     why_not_reproduced,
+ )
+ from repro.contracts import (
+@@ -23,21 +24,19 @@ SYSTEM_PROMPT = """\
+ Write ONE pytest test that FAILS because of the reported bug.
+ 
+ - Import only from the project and the standard library.
++- `source` is the real code: call only names in it, with their real parameters.
+ - No network, no sleep, no randomness.
+ - Never mock or patch the code under test; mocking it proves nothing.
+ - Assert what the CLIENT described, not what the code does now.
+ 
+-A test that PASSES is a failed reproduction: you have not shown the bug exists. If a previous attempt is shown, read its error and change approach.
++A test that PASSES is a failed reproduction, and so is one that fails with TypeError, NameError or ImportError. If a previous attempt is shown, read its output and change approach.
+ 
+ Example - "charged me postage even though the site says free postage over $50":
+ 
+     from shopcart.pricing import Line, total
+ 
+     def test_free_shipping_uses_pre_discount_total():
+-        # $55 of goods, 10% promo. Free postage was promised over $50.
+         assert total([Line("A", 55.0, 1)], promo="SAVE10") == 49.50
+-
+-It fails today because postage is added back: that failure IS the reproduction.
+ """
+ 
+ #: A whole test file, JSON-escaped. The 1024 default truncates
+@@ -56,17 +55,20 @@ def repro_agent_node(state: GraphState, llm: LLMClient, *, sandbox: Sandbox | No
+     box = require_sandbox(sandbox)
+     attempts = state.get("repro_attempts", [])
+ 
++    hypotheses = state.get("hypotheses", [])
++    parts: dict = {
++        "facts": state.get("facts"),
++        "hypotheses": hypotheses,
++        "previous": [_previous(a) for a in attempts[-1:]],
++    }
++    source = source_excerpts(box, hypotheses)
++    if source:
++        parts["source"] = source
++
+     try:
+         test, response = llm.structured(
+             system=SYSTEM_PROMPT,
+-            user=payload(
+-                facts=state.get("facts"),
+-                hypotheses=state.get("hypotheses", []),
+-                previous=[
+-                    {"path": a.test.path, "reasoning": a.reasoning, "stderr": a.result.stderr_tail}
+-                    for a in attempts[-1:]
+-                ],
+-            ),
++            user=payload(**parts),
+             max_tokens=MAX_TOKENS,
+             schema=TestArtifact,
+         )
+@@ -77,6 +79,11 @@ def repro_agent_node(state: GraphState, llm: LLMClient, *, sandbox: Sandbox | No
+         return _no_usable_test(state, exc)
+ 
+     result, refusal = _write_and_run(box, test)
++    reproduced = is_reproduction(result)
++    if not reproduced and refusal is None:
++        # A test that passed or broke stays out of tests/: check 2 runs the
++        # whole suite, and a leftover red test there would veto every fix.
++        _remove(box, test.path)
+ 
+     return {
+         "repro_attempts": [
+@@ -85,7 +92,7 @@ def repro_agent_node(state: GraphState, llm: LLMClient, *, sandbox: Sandbox | No
+                 attempt_no=min(state.get("repro_count", 0) + 1, MAX_REPRO_ATTEMPTS),
+                 test=test,
+                 result=result,
+-                reproduced=is_reproduction(result),
++                reproduced=reproduced,
+                 reasoning=refusal or why_not_reproduced(result),
+             )
+         ],
+@@ -93,6 +100,32 @@ def repro_agent_node(state: GraphState, llm: LLMClient, *, sandbox: Sandbox | No
+     }
+ 
+ 
++#: How much of the previous attempt's pytest output goes back to the model.
++#: The end is where the assertion or the exception is.
++PREVIOUS_OUTPUT_CHARS = 1500
++
++
++def _previous(attempt: ReproAttempt) -> dict:
++    """What the model needs to do better than its last try: what pytest said."""
++    return {
++        "path": attempt.test.path,
++        "reasoning": attempt.reasoning,
++        "stderr": attempt.result.stderr_tail,
++        "output": attempt.result.stdout_tail[-PREVIOUS_OUTPUT_CHARS:],
++    }
++
++
++def _remove(box: Sandbox, path: str) -> None:
++    """Delete a generated test, on a sandbox that can. Never raises."""
++    remove = getattr(box, "remove_test", None)
++    if remove is None:
++        return
++    try:
++        remove(path)
++    except (OSError, ValueError):
++        pass
++
++
+ def _write_and_run(box: Sandbox, test: TestArtifact) -> tuple[ExecutionResult, str | None]:
+     """Run the model's test, or record why we would not. Never raises.
+ 
+diff --git a/src/repro/graph/sandbox_seam.py b/src/repro/graph/sandbox_seam.py
+index 38b83eb..5a01179 100644
+--- a/src/repro/graph/sandbox_seam.py
++++ b/src/repro/graph/sandbox_seam.py
+@@ -6,7 +6,8 @@ narrow surface below rather than on those modules directly, which is what lets
+ the whole graph be driven by a canned stub, in CI, for zero tokens.
+ 
+ The surface is ARCHITECTURE.md's allow-list and nothing else: read (search) a
+-file, write a file under tests/, run pytest, apply a unified diff. There is no
++file, read one capped Python source file, write a file under tests/, run
++pytest, apply a unified diff. There is no
+ shell, no install, no network -- if it is not a method here, the agent cannot
+ do it.
+ """
+@@ -35,6 +36,12 @@ Hit = tuple[str, str, float]
+ #: The agent may write here and nowhere else (ARCHITECTURE.md, "Allow-list").
+ TEST_DIR = "tests/"
+ 
++#: How much of one source file the model is shown. A test written without
++#: seeing the code guesses at signatures, and a diff written without seeing it
++#: has context lines that do not exist -- so the file is shown, but capped,
++#: because it is re-sent on every turn of the repro and fix loops.
++SOURCE_MAX_CHARS = 8000
++
+ 
+ def sandbox_timeout_s() -> int:
+     """How long one pytest invocation may take. Read at call time, never cached.
+@@ -82,13 +89,39 @@ def unsafe_test_path(path: str) -> str | None:
+     return None
+ 
+ 
++def unreadable_source_path(path: str) -> str | None:
++    """Why this source path may not be shown to the model, or None if it is fine.
++
++    The path comes from a Hypothesis, which the model wrote, so it is untrusted
++    in the same way a test path is. Only `.py` files are ever read: a repo's
++    `.env` or a key file must never be pasted into a prompt.
++    """
++    raw = (path or "").strip()
++    if not raw:
++        return "the path is empty"
++    if "\x00" in raw:
++        return "the path contains a NUL byte"
++    candidate = Path(raw)
++    if candidate.is_absolute() or candidate.anchor:
++        return f"{raw!r} is absolute; source paths are relative to the workspace root"
++    if ".." in candidate.parts:
++        return f"{raw!r} contains '..' and could escape the workspace"
++    if not raw.endswith(".py"):
++        return f"{raw!r} is not a Python source file"
++    return None
++
++
+ class Sandbox(Protocol):
+     def search(self, query: str, k: int = 8) -> list[Hit]: ...
+ 
++    def read_source(self, path: str, max_chars: int = SOURCE_MAX_CHARS) -> str | None: ...
++
+     def rank_candidates(self, hits: list[Hit], k: int) -> list[Hypothesis]: ...
+ 
+     def write_test(self, test: TestArtifact) -> None: ...
+ 
++    def remove_test(self, test_path: str) -> None: ...
++
+     def run_test(self, test_path: str) -> ExecutionResult: ...
+ 
+     def run_suite(self) -> ExecutionResult: ...
+@@ -117,6 +150,8 @@ class WorkspaceSandbox:
+         #: The interpreter pytest runs under: the virtualenv `sandbox.deps`
+         #: built for this repo, or None for the harness's own.
+         self.python_exe = python_exe
++        #: Test files the agent wrote, so only those can be overwritten or removed.
++        self._written: set[str] = set()
+ 
+     def search(self, query: str, k: int = 8) -> list[Hit]:
+         return _search(self.ws, query, k=k)
+@@ -124,6 +159,20 @@ class WorkspaceSandbox:
+     def rank_candidates(self, hits: list[Hit], k: int) -> list[Hypothesis]:
+         return _rank_candidates(hits, k)
+ 
++    def read_source(self, path: str, max_chars: int = SOURCE_MAX_CHARS) -> str | None:
++        """The head of one `.py` file in the workspace, or None. Never raises.
++
++        None covers every way the file cannot be shown -- not Python, outside
++        the workspace, missing, unreadable -- because a missing excerpt only
++        makes the prompt poorer; it must never cost the run.
++        """
++        if unreadable_source_path(path):
++            return None
++        try:
++            return self.ws.read_file(path.strip(), max_chars=max_chars)
++        except (OSError, ValueError, RuntimeError):
++            return None
++
+     def write_test(self, test: TestArtifact) -> None:
+         # The security boundary, not a lint: Workspace.write_file is generic on
+         # purpose (the patcher needs it), so "only under tests/" is enforced
+@@ -131,7 +180,32 @@ class WorkspaceSandbox:
+         problem = unsafe_test_path(test.path)
+         if problem:
+             raise ValueError(f"refusing to write {test.path!r}: {problem}")
+-        self.ws.write_file(test.path, test.source)
++        path = test.path.strip()
++        if path not in self._written and self.ws.resolve_path(path).exists():
++            # Overwriting one of the client's own tests would quietly delete
++            # coverage that check 2 (the whole suite) relies on.
++            raise ValueError(
++                f"refusing to write {path!r}: that file is one of the project's own tests; "
++                "write the reproduction to a new file"
++            )
++        self.ws.write_file(path, test.source)
++        self._written.add(path)
++
++    def remove_test(self, test_path: str) -> None:
++        """Delete a test THIS sandbox wrote. Anything else is left alone.
++
++        A generated test that did not reproduce the bug -- it passed, or it was
++        broken -- must not stay in tests/: the fix is only accepted when the
++        whole suite is green, and a leftover red test would veto every patch.
++        """
++        path = (test_path or "").strip()
++        if path not in self._written:
++            return
++        try:
++            self.ws.resolve_path(path).unlink(missing_ok=True)
++        except (OSError, ValueError, RuntimeError):
++            return
++        self._written.discard(path)
+ 
+     def run_test(self, test_path: str) -> ExecutionResult:
+         return _run_pytest(
+@@ -165,9 +239,15 @@ class StubSandbox:
+     def rank_candidates(self, hits: list[Hit], k: int) -> list[Hypothesis]:
+         return []
+ 
++    def read_source(self, path: str, max_chars: int = SOURCE_MAX_CHARS) -> str | None:
++        return None
++
+     def write_test(self, test: TestArtifact) -> None:
+         return None
+ 
++    def remove_test(self, test_path: str) -> None:
++        return None
++
+     def run_test(self, test_path: str) -> ExecutionResult:
+         return self._GREEN
+ 
+diff --git a/src/repro/llm/cassettes/e2fbd6456452e71e.json b/src/repro/llm/cassettes/e2fbd6456452e71e.json
+new file mode 100644
+index 0000000..a297197
+--- /dev/null
++++ b/src/repro/llm/cassettes/e2fbd6456452e71e.json
+@@ -0,0 +1,16 @@
++{
++  "note": "Re-keyed, not re-recorded: this reply was recorded against an earlier prompt (the one in 'system'/'user'), before repro and fix were shown the source. Filed under today's prompt key so offline replay still runs. Re-record with `make record` (costs money) to replace it.",
++  "raw_text": "```json\n{\n  \"path\": \"tests/test_shipping_threshold.py\",\n  \"source\": \"from shopcart.pricing import shipping_for\\n\\n\\ndef test_free_shipping_uses_pre_discount_total():\\n    \\\"\\\"\\\"\\n    Test that free shipping threshold is applied to pre-discount total.\\n    \\n    A basket with $55 of goods should qualify for free shipping (over $50),\\n    even if a discount is applied that reduces the final total below $50.\\n    \\\"\\\"\\\"\\n    # $55 pre-discount total with 10% discount applied\\n    # Final total would be $49.50, but threshold should use $55\\n    shipping_cost = shipping_for(subtotal=55.0, discount=5.50)\\n    assert shipping_cost == 0, (\\n        \\\"Expected free shipping for pre-discount total of $55 (over $50 threshold), \\\"\\n        f\\\"but got shipping cost of ${shipping_cost}\\\"\\n    )\\n\"\n}\n```",
++  "rekeyed_from": "192c4c54f30119ca",
++  "schema": "TestArtifact",
++  "stop_reason": "end_turn",
++  "system": "Write ONE pytest test that FAILS because of the reported bug.\n\n- Import only from the project and the standard library.\n- No network, no sleep, no randomness.\n- Never mock or patch the code under test; mocking it proves nothing.\n- Assert what the CLIENT described, not what the code does now.\n\nA test that PASSES is a failed reproduction: you have not shown the bug exists. If a previous attempt is shown, read its error and change approach.\n\nExample - \"charged me postage even though the site says free postage over $50\":\n\n    from shopcart.pricing import Line, total\n\n    def test_free_shipping_uses_pre_discount_total():\n        # $55 of goods, 10% promo. Free postage was promised over $50.\n        assert total([Line(\"A\", 55.0, 1)], promo=\"SAVE10\") == 49.50\n\nIt fails today because postage is added back: that failure IS the reproduction.\n",
++  "text": "{\"path\":\"tests/test_shipping_threshold.py\",\"source\":\"from shopcart.pricing import shipping_for\\n\\n\\ndef test_free_shipping_uses_pre_discount_total():\\n    \\\"\\\"\\\"\\n    Test that free shipping threshold is applied to pre-discount total.\\n    \\n    A basket with $55 of goods should qualify for free shipping (over $50),\\n    even if a discount is applied that reduces the final total below $50.\\n    \\\"\\\"\\\"\\n    # $55 pre-discount total with 10% discount applied\\n    # Final total would be $49.50, but threshold should use $55\\n    shipping_cost = shipping_for(subtotal=55.0, discount=5.50)\\n    assert shipping_cost == 0, (\\n        \\\"Expected free shipping for pre-discount total of $55 (over $50 threshold), \\\"\\n        f\\\"but got shipping cost of ${shipping_cost}\\\"\\n    )\\n\"}",
++  "usage": {
++    "calls": 1,
++    "input_tokens": 599,
++    "output_tokens": 249,
++    "usd": 0.001844
++  },
++  "user": "{\"facts\": {\"observed_behaviour\": \"charged postage fee despite basket total exceeding $50 and site stating free postage over $50\", \"expected_behaviour\": \"no postage charge should apply\", \"steps\": [\"attempted to purchase items\", \"basket total was over $50\"], \"entrypoint_hint\": \"checkout\", \"environment\": null, \"missing\": [\"expected_behaviour\"], \"confidence\": 0.72}, \"hypotheses\": [{\"file_path\": \"shopcart/pricing.py\", \"symbol\": \"shipping_for\", \"rationale\": \"The client was 'charged postage fee despite basket total exceeding $50'. The shipping_for function compares the threshold against the discounted subtotal rather than the pre-discount total, so a $55 basket with an applied discount falls below $50 and incurs the shipping charge.\", \"confidence\": 0.95}], \"previous\": []}"
++}
+diff --git a/src/repro/sandbox/patcher.py b/src/repro/sandbox/patcher.py
+index 4c3eb72..90e6c33 100644
+--- a/src/repro/sandbox/patcher.py
++++ b/src/repro/sandbox/patcher.py
+@@ -266,7 +266,10 @@ def _run_git(ws: Workspace, args: list[str], diff: str) -> subprocess.CompletedP
+ 
+ def _git_apply(ws: Workspace, diff: str, strip: int) -> tuple[bool, str]:
+     """--check first so a bad diff never gets as far as touching the tree."""
+-    args = [f"-p{strip}", "--whitespace=nowarn"]
++    # --recount: a model miscounts hunk-header line counts far more often than
++    # it gets a context line wrong, and git would reject the whole diff as
++    # "corrupt patch" for it. The context lines must still match exactly.
++    args = [f"-p{strip}", "--whitespace=nowarn", "--recount"]
+     check = _run_git(ws, [*args, "--check"], diff)
+     if check.returncode != 0:
+         # git's own message names the file and the line. That text is fed back
+diff --git a/tests/test_show_code_to_model.py b/tests/test_show_code_to_model.py
+new file mode 100644
+index 0000000..ac3a224
+--- /dev/null
++++ b/tests/test_show_code_to_model.py
+@@ -0,0 +1,470 @@
++"""The repro and fix nodes see the real code, and are judged on real evidence.
++
++Three failures from real runs, each pinned here:
++
++  1. Neither node was shown the source. The repro node guessed signatures, so
++     its "reproduction" was a TypeError from calling a function with an
++     argument it does not take; the fix node wrote diffs against a file it had
++     never seen, so `git apply` refused every one.
++  2. That TypeError was counted as a reproduction, because pytest reports it
++     as "1 failed" exactly like a real assertion.
++  3. The fix node was never told WHY its last diff was rejected: git's own
++     message was replaced by "neither fixed ... nor left the suite green".
++"""
++from __future__ import annotations
++
++import json
++import textwrap
++from pathlib import Path
++
++import pytest
++
++from repro.agents._common import (
++    broken_test_reason,
++    is_reproduction,
++    source_excerpts,
++    why_not_reproduced,
++)
++from repro.agents.fix import fix_node
++from repro.agents.reporter import reporter_node
++from repro.agents.repro_agent import repro_agent_node
++from repro.contracts import (
++    ClientReport,
++    ExecutionResult,
++    Handover,
++    Hypothesis,
++    Patch,
++    ReportFacts,
++    ReproAttempt,
++    Verdict,
++)
++from repro.contracts import TestArtifact as GeneratedTest
++from repro.graph.build import run
++from repro.graph.sandbox_seam import SOURCE_MAX_CHARS, StubSandbox, WorkspaceSandbox
++from repro.llm.base import SchemaValidationError
++from repro.llm.fake import ScriptedLLM
++from repro.sandbox.patcher import apply_patch
++from repro.sandbox.workspace import Workspace
++
++
++def failed(stdout: str, n: int = 1) -> ExecutionResult:
++    return ExecutionResult(exit_code=1, stdout_tail=stdout, stderr_tail="", duration_s=0.1, failed=n)
++
++
++SIGNATURE_MISMATCH = """\
++_____________________________ test_free_shipping ______________________________
++tests/test_shipping.py:5: in test_free_shipping
++    assert shipping_for(subtotal=55.0, discount=5.5) == 0
++           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++E   TypeError: shipping_for() got an unexpected keyword argument 'discount'
++=========================== short test summary info ============================
++FAILED tests/test_shipping.py::test_free_shipping - TypeError: shipping_for() got...
++1 failed in 0.05s
++"""
++
++ASSERTION = """\
++_________________________________ test_genuine _________________________________
++tests/test_fees.py:8: in test_genuine
++    assert late_fee(due, returned) == 0
++E   AssertionError: assert 40 == 0
++1 failed in 0.05s
++"""
++
++TYPEERROR_IN_PROJECT = """\
++_____________________________ test_inside_project ______________________________
++tests/test_fees.py:11: in test_inside_project
++    late_fee(due, None)
++library/fees.py:19: in days_late
++    return max(0, (returned - due).days)
++E   TypeError: unsupported operand type(s) for -: 'NoneType' and 'date'
++1 failed in 0.05s
++"""
++
++
++# --- 1. a test that fails on its own mistake is not a reproduction ------------
++
++
++def test_a_signature_mismatch_in_the_test_is_a_broken_test():
++    result = failed(SIGNATURE_MISMATCH)
++
++    assert broken_test_reason(result) == (
++        "TypeError: shipping_for() got an unexpected keyword argument 'discount'"
++    )
++    assert not is_reproduction(result)
++    assert "broken test" in why_not_reproduced(result)
++    assert "discount" in why_not_reproduced(result)
++
++
++def test_a_real_assertion_failure_is_still_a_reproduction():
++    result = failed(ASSERTION)
++
++    assert broken_test_reason(result) is None
++    assert is_reproduction(result)
++
++
++def test_a_typeerror_raised_inside_the_project_is_the_bug_not_the_test():
++    # The deepest frame is the project's own file: that TypeError IS the bug.
++    result = failed(TYPEERROR_IN_PROJECT)
++
++    assert broken_test_reason(result) is None
++    assert is_reproduction(result)
++
++
++@pytest.mark.parametrize(
++    "line",
++    [
++        "E   NameError: name 'Basket' is not defined",
++        "E   TypeError: total() missing 1 required positional argument: 'lines'",
++        "E   TypeError: late_fee() takes 2 positional arguments but 3 were given",
++        "E   AttributeError: module 'shopcart.pricing' has no attribute 'total_price'",
++        "E   ModuleNotFoundError: No module named 'shop'",
++    ],
++)
++def test_mistakes_only_a_wrong_test_makes_are_broken_tests(line):
++    result = failed(f"tests/test_x.py:3: in test_x\n    call()\n{line}\n1 failed\n")
++
++    assert broken_test_reason(result) is not None
++    assert not is_reproduction(result)
++
++
++@pytest.mark.parametrize(
++    "line",
++    [
++        # These can be exactly what the client saw, so they still count.
++        "E   AttributeError: 'NoneType' object has no attribute 'title'",
++        "E   TypeError: 'NoneType' object is not subscriptable",
++        "E   ZeroDivisionError: division by zero",
++    ],
++)
++def test_errors_a_real_bug_can_cause_still_count(line):
++    result = failed(f"tests/test_x.py:3: in test_x\n    call()\n{line}\n1 failed\n")
++
++    assert broken_test_reason(result) is None
++    assert is_reproduction(result)
++
++
++def test_one_broken_test_in_the_file_spoils_the_reproduction():
++    # A fix is verified by running the whole file again: a broken test in it
++    # would stay red after any fix, so the file proves nothing.
++    result = failed(ASSERTION + SIGNATURE_MISMATCH, n=2)
++
++    assert not is_reproduction(result)
++
++
++# --- 2. the sandbox can show the model a source file, safely -----------------
++
++
++@pytest.fixture
++def project(tmp_path: Path):
++    source = tmp_path / "project"
++    (source / "shop").mkdir(parents=True)
++    (source / "tests").mkdir()
++    (source / "shop" / "__init__.py").write_text("")
++    (source / "shop" / "pricing.py").write_text(
++        textwrap.dedent(
++            '''\
++            FREE_OVER = 50
++
++
++            def shipping_for(subtotal):
++                """Postage for a basket of this value."""
++                if subtotal > FREE_OVER:
++                    return 0
++                return 5
++
++
++            def total(subtotal, discount=0):
++                discounted = subtotal - discount
++                return discounted + shipping_for(discounted)
++            '''
++        )
++    )
++    (source / "tests" / "test_pricing.py").write_text(
++        "from shop.pricing import shipping_for\n\n\ndef test_small_basket_pays_postage():\n"
++        "    assert shipping_for(10) == 5\n"
++    )
++    (source / ".env").write_text("SECRET_KEY=hunter2\n")
++    ws = Workspace(source, root=tmp_path / "ws")
++    try:
++        yield ws
++    finally:
++        ws.close()
++
++
++def test_read_source_returns_the_real_file(project):
++    box = WorkspaceSandbox(project)
++
++    code = box.read_source("shop/pricing.py")
++
++    assert code is not None and "def shipping_for(subtotal):" in code
++
++
++@pytest.mark.parametrize("path", [".env", "../project/shop/pricing.py", "/etc/passwd", "shop/missing.py", ""])
++def test_read_source_never_shows_secrets_escapes_or_missing_files(project, path):
++    assert WorkspaceSandbox(project).read_source(path) is None
++
++
++def test_read_source_is_capped(project):
++    (project.path / "shop" / "big.py").write_text("x = 1\n" * 10_000)
++
++    code = WorkspaceSandbox(project).read_source("shop/big.py")
++
++    assert code is not None and len(code) <= SOURCE_MAX_CHARS
++
++
++def test_source_excerpts_reads_distinct_suspected_files_only(project):
++    hypotheses = [
++        Hypothesis(file_path="shop/pricing.py", rationale="a. b.", confidence=0.9),
++        Hypothesis(file_path="shop/pricing.py", rationale="a. b.", confidence=0.5),
++        Hypothesis(file_path=".env", rationale="a. b.", confidence=0.4),
++    ]
++
++    excerpts = source_excerpts(WorkspaceSandbox(project), hypotheses)
++
++    assert [e["path"] for e in excerpts] == ["shop/pricing.py"]
++
++
++def test_a_sandbox_without_read_source_still_works():
++    class OldSandbox:  # a test double written before read_source existed
++        pass
++
++    assert source_excerpts(OldSandbox(), [Hypothesis(file_path="a.py", rationale="a. b.", confidence=1)]) == []
++
++
++def test_the_agent_may_not_overwrite_the_projects_own_tests(project):
++    box = WorkspaceSandbox(project)
++    original = (project.path / "tests" / "test_pricing.py").read_text()
++
++    with pytest.raises(ValueError, match="project's own tests"):
++        box.write_test(GeneratedTest(path="tests/test_pricing.py", source="def test_x():\n    assert 0\n"))
++
++    assert (project.path / "tests" / "test_pricing.py").read_text() == original
++
++
++def test_remove_test_only_removes_what_the_agent_wrote(project):
++    box = WorkspaceSandbox(project)
++    box.write_test(GeneratedTest(path="tests/test_new.py", source="def test_x():\n    pass\n"))
++    # Rewriting its own file on a later attempt is allowed.
++    box.write_test(GeneratedTest(path="tests/test_new.py", source="def test_y():\n    pass\n"))
++
++    box.remove_test("tests/test_new.py")
++    box.remove_test("tests/test_pricing.py")
++
++    assert not (project.path / "tests" / "test_new.py").exists()
++    assert (project.path / "tests" / "test_pricing.py").exists()
++
++
++# --- 3. the nodes put the source, and the evidence, in front of the model ----
++
++
++def facts() -> ReportFacts:
++    return ReportFacts(
++        observed_behaviour="charged postage on a basket over $50",
++        entrypoint_hint="checkout",
++        confidence=0.9,
++    )
++
++
++def pricing_hypothesis() -> Hypothesis:
++    return Hypothesis(file_path="shop/pricing.py", symbol="total", rationale="a. b.", confidence=0.8)
++
++
++def sent(llm: ScriptedLLM, index: int = -1) -> dict:
++    return json.loads(llm.calls[index][1])
++
++
++def test_the_repro_node_is_shown_the_suspected_source(project):
++    llm = ScriptedLLM([GeneratedTest(path="tests/test_bug.py", source="def test_bug():\n    assert 0\n")])
++    state = {"facts": facts(), "hypotheses": [pricing_hypothesis()], "repro_count": 0}
++
++    repro_agent_node(state, llm, sandbox=WorkspaceSandbox(project))
++
++    source = sent(llm)["source"]
++    assert source[0]["path"] == "shop/pricing.py"
++    assert "def shipping_for(subtotal):" in source[0]["code"]
++
++
++def test_the_repro_node_sees_what_pytest_said_last_time(project):
++    llm = ScriptedLLM([GeneratedTest(path="tests/test_bug2.py", source="def test_bug():\n    assert 0\n")])
++    last = ReproAttempt(
++        attempt_no=1,
++        test=GeneratedTest(path="tests/test_bug.py", source=""),
++        result=failed(SIGNATURE_MISMATCH),
++        reproduced=False,
++        reasoning="broken",
++    )
++    state = {"facts": facts(), "hypotheses": [], "repro_attempts": [last], "repro_count": 1}
++
++    repro_agent_node(state, llm, sandbox=WorkspaceSandbox(project))
++
++    assert "unexpected keyword argument 'discount'" in sent(llm)["previous"][0]["output"]
++
++
++def test_a_test_that_did_not_reproduce_is_removed_from_the_workspace(project):
++    box = WorkspaceSandbox(project)
++    broken = GeneratedTest(
++        path="tests/test_bug.py",
++        source="from shop.pricing import shipping_for\n\n\ndef test_bug():\n"
++        "    assert shipping_for(subtotal=55, discount=5) == 0\n",
++    )
++
++    out = repro_agent_node(
++        {"facts": facts(), "hypotheses": [], "repro_count": 0}, ScriptedLLM([broken]), sandbox=box
++    )
++
++    attempt = out["repro_attempts"][0]
++    assert attempt.result.failed == 1  # pytest called it a failure...
++    assert attempt.reproduced is False  # ...but it is the test's own mistake
++    assert "broken test" in attempt.reasoning
++    assert not (project.path / "tests" / "test_bug.py").exists()
++
++
++def test_a_real_reproduction_is_kept_for_the_fix_node(project):
++    box = WorkspaceSandbox(project)
++    real = GeneratedTest(
++        path="tests/test_bug.py",
++        source="from shop.pricing import total\n\n\ndef test_bug():\n    assert total(55, discount=5.5) == 49.5\n",
++    )
++
++    out = repro_agent_node(
++        {"facts": facts(), "hypotheses": [], "repro_count": 0}, ScriptedLLM([real]), sandbox=box
++    )
++
++    assert out["repro_attempts"][0].reproduced is True
++    assert (project.path / "tests" / "test_bug.py").exists()
++
++
++class RefusingApply(StubSandbox):
++    def apply_patch(self, patch):
++        return False, "git apply --check rejected the diff: error: patch failed: shop/pricing.py:3"
++
++
++def reproduced_state() -> dict:
++    attempt = ReproAttempt(
++        attempt_no=1,
++        test=GeneratedTest(path="tests/test_bug.py", source="def test_bug():\n    assert 0\n"),
++        result=failed(ASSERTION),
++        reproduced=True,
++        reasoning="ran and failed",
++    )
++    return {"facts": facts(), "hypotheses": [pricing_hypothesis()], "repro_attempts": [attempt], "fix_count": 0}
++
++
++def bad_diff() -> Patch:
++    return Patch(unified_diff="--- a/shop/pricing.py\n+++ b/shop/pricing.py\n", files_touched=[], rationale="a. b.")
++
++
++def test_a_diff_that_does_not_apply_says_so_in_plain_words():
++    out = fix_node(reproduced_state(), ScriptedLLM([bad_diff()]), sandbox=RefusingApply())
++
++    attempt = out["fix_attempts"][0]
++    assert attempt.accepted is False
++    assert attempt.reasoning.startswith("The patch was not applied")
++    assert "patch failed: shop/pricing.py:3" in attempt.reasoning
++    assert "neither fixed" not in attempt.reasoning
++
++
++def test_the_next_fix_attempt_is_told_what_git_said():
++    state = reproduced_state()
++    first = fix_node(state, ScriptedLLM([bad_diff()]), sandbox=RefusingApply())
++    state = {**state, "fix_attempts": first["fix_attempts"], "fix_count": 1}
++    llm = ScriptedLLM([bad_diff()])
++
++    fix_node(state, llm, sandbox=RefusingApply())
++
++    rejected = sent(llm)["rejected"][0]
++    assert "patch failed: shop/pricing.py:3" in rejected["evidence"]
++    assert rejected["reasoning"].startswith("The patch was not applied")
++
++
++def test_the_fix_node_is_shown_the_suspected_source(project):
++    llm = ScriptedLLM([bad_diff()])
++
++    fix_node(reproduced_state(), llm, sandbox=WorkspaceSandbox(project))
++
++    assert "def total(subtotal, discount=0):" in sent(llm)["source"][0]["code"]
++
++
++def test_a_diff_with_miscounted_hunk_headers_still_applies(project):
++    # Models get the @@ line counts wrong far more often than the context.
++    diff = (
++        "--- a/shop/pricing.py\n"
++        "+++ b/shop/pricing.py\n"
++        "@@ -11,3 +11,99 @@\n"
++        " def total(subtotal, discount=0):\n"
++        "     discounted = subtotal - discount\n"
++        "-    return discounted + shipping_for(discounted)\n"
++        "+    return discounted + shipping_for(subtotal)\n"
++    )
++
++    ok, message = apply_patch(project, Patch(unified_diff=diff, files_touched=["shop/pricing.py"], rationale="a. b."))
++
++    assert ok, message
++    assert "shipping_for(subtotal)" in (project.path / "shop" / "pricing.py").read_text()
++
++
++# --- 4. end to end: a broken first test no longer blocks the fix --------------
++
++
++def test_a_broken_first_test_neither_counts_nor_vetoes_the_fix(project, tmp_path):
++    """The whole story, against a real workspace and real pytest.
++
++    Attempt 1 guesses a signature and breaks. Before: it counted as the
++    reproduction, and its file stayed in tests/, red forever, so no patch could
++    ever leave the suite green. Now: it is discarded, attempt 2 reproduces
++    the bug for real, and the right patch is accepted.
++    """
++    broken = GeneratedTest(
++        path="tests/test_attempt_one.py",
++        source="from shop.pricing import shipping_for\n\n\ndef test_bug():\n"
++        "    assert shipping_for(subtotal=55, discount=5.5) == 0\n",
++    )
++    real = GeneratedTest(
++        path="tests/test_attempt_two.py",
++        source="from shop.pricing import total\n\n\ndef test_bug():\n    assert total(55, discount=5.5) == 49.5\n",
++    )
++    fix = Patch(
++        unified_diff=(
++            "--- a/shop/pricing.py\n"
++            "+++ b/shop/pricing.py\n"
++            "@@ -11,3 +11,3 @@\n"
++            " def total(subtotal, discount=0):\n"
++            "     discounted = subtotal - discount\n"
++            "-    return discounted + shipping_for(discounted)\n"
++            "+    return discounted + shipping_for(subtotal)\n"
++        ),
++        files_touched=["shop/pricing.py"],
++        rationale="Postage was judged on the discounted total. It now uses the pre-discount one.",
++    )
++    llm = ScriptedLLM(
++        [facts(), pricing_hypothesis(), broken, real, fix, Handover(dev_summary="d", client_reply="c")]
++    )
++    report = ClientReport(run_id="e2e", raw_text="charged postage over $50", repo_path=str(project.path))
++
++    record = run(report, llm, sandbox=WorkspaceSandbox(project))
++
++    first, second = record.repro_attempts
++    assert first.reproduced is False and "broken test" in first.reasoning
++    assert second.reproduced is True
++    assert record.fix_attempts[0].accepted is True
++    assert record.fix_attempts[0].suite.green
++    assert record.verdict == Verdict.REPRODUCED_AND_FIXED
++
++
++# --- 5. a letter the model could not write does not cost the verdict ---------
++
++
++class NoLetters:
++    calls: list = []
++
++    def structured(self, **kw):
++        raise SchemaValidationError("no cassette for Handover")
++
++
++def test_the_verdict_survives_when_the_letters_cannot_be_written():
++    state = {**reproduced_state(), "report": ClientReport(run_id="r", raw_text="x", repo_path="/tmp/x")}
++
++    out = reporter_node(state, NoLetters())
++
++    assert out["verdict"] == Verdict.REPRODUCED_NOT_FIXED
++    assert out["handover"] is None
+-- 
+2.43.0
+
