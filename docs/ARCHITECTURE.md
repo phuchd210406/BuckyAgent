@@ -80,10 +80,15 @@ Straight from Session 3's "Building Agents That Hold Up":
    the model's opinion about whether it is nearly done.
 3. **Descriptions are the interface** — every `Field(description=...)` in
    `contracts.py` is prompt text. Review them as prompts.
-4. **Keep payloads small** — the model never sees a whole file. `search()`
+4. **Keep payloads small** — nothing reaches the model uncapped. `search()`
    returns capped snippets; `ExecutionResult` carries tails only
    (`SANDBOX_MAX_OUTPUT_CHARS = 4000`), because a pytest traceback dump would be
-   re-read on every subsequent turn of the loop.
+   re-read on every subsequent turn of the loop. The one exception is
+   deliberate: `repro` and `fix` are shown the source of at most two suspected
+   `.py` files (`read_source`, capped at `SOURCE_MAX_CHARS = 8000` each). A
+   test written without seeing the code guesses its signatures, and a diff
+   written without seeing it has context lines that do not exist; on real
+   repositories both failed every attempt.
 
 ## Guardrails
 

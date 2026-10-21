@@ -8,6 +8,7 @@
       "case_id": "shopcart-free-shipping",
       "error": null,
       "expected_verdict": "reproduced_and_fixed",
+      "recorded_verdict": "reproduced_not_fixed",
       "report": {
         "channel": "email",
         "raw_text": "hi, i tried to buy stuff this morning and it charged me postage even though the site says free postage over $50. my basket was definitely more than $50. can you sort it out, we have customers complaining",
@@ -16,8 +17,9 @@
         "reporter_name": null,
         "run_id": "shopcart-free-shipping"
       },
+      "rescored_note": "Recorded as reproduced_not_fixed. Its only 'reproduction' called shipping_for(subtotal=55.0, discount=5.50), and shipping_for takes no discount: the test failed with TypeError on its own mistake. agents._common.broken_test_reason now scores that as a broken test, so replaying the same replies gives not_reproduced. The TestArtifact cassette was re-keyed, not re-recorded; the Handover was dropped because its letter was written for the old verdict. Run `make record` to replace both.",
       "usd": 0.014147,
-      "verdict": "reproduced_not_fixed"
+      "verdict": "not_reproduced"
     }
   ],
   "total_usd": 0.014147

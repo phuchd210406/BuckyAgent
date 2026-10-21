@@ -266,7 +266,10 @@ def _run_git(ws: Workspace, args: list[str], diff: str) -> subprocess.CompletedP
 
 def _git_apply(ws: Workspace, diff: str, strip: int) -> tuple[bool, str]:
     """--check first so a bad diff never gets as far as touching the tree."""
-    args = [f"-p{strip}", "--whitespace=nowarn"]
+    # --recount: a model miscounts hunk-header line counts far more often than
+    # it gets a context line wrong, and git would reject the whole diff as
+    # "corrupt patch" for it. The context lines must still match exactly.
+    args = [f"-p{strip}", "--whitespace=nowarn", "--recount"]
     check = _run_git(ws, [*args, "--check"], diff)
     if check.returncode != 0:
         # git's own message names the file and the line. That text is fed back

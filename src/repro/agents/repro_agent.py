@@ -7,6 +7,7 @@ from repro.agents._common import (
     is_reproduction,
     model_failures,
     payload,
+    source_excerpts,
     why_not_reproduced,
 )
 from repro.contracts import (
@@ -23,21 +24,19 @@ SYSTEM_PROMPT = """\
 Write ONE pytest test that FAILS because of the reported bug.
 
 - Import only from the project and the standard library.
+- `source` is the real code: call only names in it, with their real parameters.
 - No network, no sleep, no randomness.
 - Never mock or patch the code under test; mocking it proves nothing.
 - Assert what the CLIENT described, not what the code does now.
 
-A test that PASSES is a failed reproduction: you have not shown the bug exists. If a previous attempt is shown, read its error and change approach.
+A test that PASSES is a failed reproduction, and so is one that fails with TypeError, NameError or ImportError. If a previous attempt is shown, read its output and change approach.
 
 Example - "charged me postage even though the site says free postage over $50":
 
     from shopcart.pricing import Line, total
 
     def test_free_shipping_uses_pre_discount_total():
-        # $55 of goods, 10% promo. Free postage was promised over $50.
         assert total([Line("A", 55.0, 1)], promo="SAVE10") == 49.50
-
-It fails today because postage is added back: that failure IS the reproduction.
 """
 
 #: A whole test file, JSON-escaped. The 1024 default truncates
@@ -56,17 +55,20 @@ def repro_agent_node(state: GraphState, llm: LLMClient, *, sandbox: Sandbox | No
     box = require_sandbox(sandbox)
     attempts = state.get("repro_attempts", [])
 
+    hypotheses = state.get("hypotheses", [])
+    parts: dict = {
+        "facts": state.get("facts"),
+        "hypotheses": hypotheses,
+        "previous": [_previous(a) for a in attempts[-1:]],
+    }
+    source = source_excerpts(box, hypotheses)
+    if source:
+        parts["source"] = source
+
     try:
         test, response = llm.structured(
             system=SYSTEM_PROMPT,
-            user=payload(
-                facts=state.get("facts"),
-                hypotheses=state.get("hypotheses", []),
-                previous=[
-                    {"path": a.test.path, "reasoning": a.reasoning, "stderr": a.result.stderr_tail}
-                    for a in attempts[-1:]
-                ],
-            ),
+            user=payload(**parts),
             max_tokens=MAX_TOKENS,
             schema=TestArtifact,
         )
@@ -77,6 +79,11 @@ def repro_agent_node(state: GraphState, llm: LLMClient, *, sandbox: Sandbox | No
         return _no_usable_test(state, exc)
 
     result, refusal = _write_and_run(box, test)
+    reproduced = is_reproduction(result)
+    if not reproduced and refusal is None:
+        # A test that passed or broke stays out of tests/: check 2 runs the
+        # whole suite, and a leftover red test there would veto every fix.
+        _remove(box, test.path)
 
     return {
         "repro_attempts": [
@@ -85,12 +92,38 @@ def repro_agent_node(state: GraphState, llm: LLMClient, *, sandbox: Sandbox | No
                 attempt_no=min(state.get("repro_count", 0) + 1, MAX_REPRO_ATTEMPTS),
                 test=test,
                 result=result,
-                reproduced=is_reproduction(result),
+                reproduced=reproduced,
                 reasoning=refusal or why_not_reproduced(result),
             )
         ],
         "usage": add_usage(state, response),
     }
+
+
+#: How much of the previous attempt's pytest output goes back to the model.
+#: The end is where the assertion or the exception is.
+PREVIOUS_OUTPUT_CHARS = 1500
+
+
+def _previous(attempt: ReproAttempt) -> dict:
+    """What the model needs to do better than its last try: what pytest said."""
+    return {
+        "path": attempt.test.path,
+        "reasoning": attempt.reasoning,
+        "stderr": attempt.result.stderr_tail,
+        "output": attempt.result.stdout_tail[-PREVIOUS_OUTPUT_CHARS:],
+    }
+
+
+def _remove(box: Sandbox, path: str) -> None:
+    """Delete a generated test, on a sandbox that can. Never raises."""
+    remove = getattr(box, "remove_test", None)
+    if remove is None:
+        return
+    try:
+        remove(path)
+    except (OSError, ValueError):
+        pass
 
 
 def _write_and_run(box: Sandbox, test: TestArtifact) -> tuple[ExecutionResult, str | None]:

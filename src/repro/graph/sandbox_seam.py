@@ -6,7 +6,8 @@ narrow surface below rather than on those modules directly, which is what lets
 the whole graph be driven by a canned stub, in CI, for zero tokens.
 
 The surface is ARCHITECTURE.md's allow-list and nothing else: read (search) a
-file, write a file under tests/, run pytest, apply a unified diff. There is no
+file, read one capped Python source file, write a file under tests/, run
+pytest, apply a unified diff. There is no
 shell, no install, no network -- if it is not a method here, the agent cannot
 do it.
 """
@@ -34,6 +35,12 @@ Hit = tuple[str, str, float]
 
 #: The agent may write here and nowhere else (ARCHITECTURE.md, "Allow-list").
 TEST_DIR = "tests/"
+
+#: How much of one source file the model is shown. A test written without
+#: seeing the code guesses at signatures, and a diff written without seeing it
+#: has context lines that do not exist -- so the file is shown, but capped,
+#: because it is re-sent on every turn of the repro and fix loops.
+SOURCE_MAX_CHARS = 8000
 
 
 def sandbox_timeout_s() -> int:
@@ -82,12 +89,38 @@ def unsafe_test_path(path: str) -> str | None:
     return None
 
 
+def unreadable_source_path(path: str) -> str | None:
+    """Why this source path may not be shown to the model, or None if it is fine.
+
+    The path comes from a Hypothesis, which the model wrote, so it is untrusted
+    in the same way a test path is. Only `.py` files are ever read: a repo's
+    `.env` or a key file must never be pasted into a prompt.
+    """
+    raw = (path or "").strip()
+    if not raw:
+        return "the path is empty"
+    if "\x00" in raw:
+        return "the path contains a NUL byte"
+    candidate = Path(raw)
+    if candidate.is_absolute() or candidate.anchor:
+        return f"{raw!r} is absolute; source paths are relative to the workspace root"
+    if ".." in candidate.parts:
+        return f"{raw!r} contains '..' and could escape the workspace"
+    if not raw.endswith(".py"):
+        return f"{raw!r} is not a Python source file"
+    return None
+
+
 class Sandbox(Protocol):
     def search(self, query: str, k: int = 8) -> list[Hit]: ...
+
+    def read_source(self, path: str, max_chars: int = SOURCE_MAX_CHARS) -> str | None: ...
 
     def rank_candidates(self, hits: list[Hit], k: int) -> list[Hypothesis]: ...
 
     def write_test(self, test: TestArtifact) -> None: ...
+
+    def remove_test(self, test_path: str) -> None: ...
 
     def run_test(self, test_path: str) -> ExecutionResult: ...
 
@@ -117,12 +150,28 @@ class WorkspaceSandbox:
         #: The interpreter pytest runs under: the virtualenv `sandbox.deps`
         #: built for this repo, or None for the harness's own.
         self.python_exe = python_exe
+        #: Test files the agent wrote, so only those can be overwritten or removed.
+        self._written: set[str] = set()
 
     def search(self, query: str, k: int = 8) -> list[Hit]:
         return _search(self.ws, query, k=k)
 
     def rank_candidates(self, hits: list[Hit], k: int) -> list[Hypothesis]:
         return _rank_candidates(hits, k)
+
+    def read_source(self, path: str, max_chars: int = SOURCE_MAX_CHARS) -> str | None:
+        """The head of one `.py` file in the workspace, or None. Never raises.
+
+        None covers every way the file cannot be shown -- not Python, outside
+        the workspace, missing, unreadable -- because a missing excerpt only
+        makes the prompt poorer; it must never cost the run.
+        """
+        if unreadable_source_path(path):
+            return None
+        try:
+            return self.ws.read_file(path.strip(), max_chars=max_chars)
+        except (OSError, ValueError, RuntimeError):
+            return None
 
     def write_test(self, test: TestArtifact) -> None:
         # The security boundary, not a lint: Workspace.write_file is generic on
@@ -131,7 +180,32 @@ class WorkspaceSandbox:
         problem = unsafe_test_path(test.path)
         if problem:
             raise ValueError(f"refusing to write {test.path!r}: {problem}")
-        self.ws.write_file(test.path, test.source)
+        path = test.path.strip()
+        if path not in self._written and self.ws.resolve_path(path).exists():
+            # Overwriting one of the client's own tests would quietly delete
+            # coverage that check 2 (the whole suite) relies on.
+            raise ValueError(
+                f"refusing to write {path!r}: that file is one of the project's own tests; "
+                "write the reproduction to a new file"
+            )
+        self.ws.write_file(path, test.source)
+        self._written.add(path)
+
+    def remove_test(self, test_path: str) -> None:
+        """Delete a test THIS sandbox wrote. Anything else is left alone.
+
+        A generated test that did not reproduce the bug -- it passed, or it was
+        broken -- must not stay in tests/: the fix is only accepted when the
+        whole suite is green, and a leftover red test would veto every patch.
+        """
+        path = (test_path or "").strip()
+        if path not in self._written:
+            return
+        try:
+            self.ws.resolve_path(path).unlink(missing_ok=True)
+        except (OSError, ValueError, RuntimeError):
+            return
+        self._written.discard(path)
 
     def run_test(self, test_path: str) -> ExecutionResult:
         return _run_pytest(
@@ -165,7 +239,13 @@ class StubSandbox:
     def rank_candidates(self, hits: list[Hit], k: int) -> list[Hypothesis]:
         return []
 
+    def read_source(self, path: str, max_chars: int = SOURCE_MAX_CHARS) -> str | None:
+        return None
+
     def write_test(self, test: TestArtifact) -> None:
+        return None
+
+    def remove_test(self, test_path: str) -> None:
         return None
 
     def run_test(self, test_path: str) -> ExecutionResult:
