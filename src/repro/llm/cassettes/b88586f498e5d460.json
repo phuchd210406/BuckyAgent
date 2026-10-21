@@ -1,0 +1,14 @@
+{
+  "raw_text": "```json\n{\n  \"question\": \"What were you trying to do when you noticed something wasn't working, and what happened instead?\",\n  \"why_it_matters\": \"We need to know the specific action and what went wrong to locate and fix the problem.\",\n  \"unblocks_field\": \"steps\"\n}\n```",
+  "schema": "ClarifyingQuestion",
+  "stop_reason": "end_turn",
+  "system": "Write ONE question back to the person who reported the problem. They are not a developer and cannot read code.\n\nYou get their report, the facts we extracted, and the fields still missing. Ask the single question that unblocks the most important one.\n\nNever mention file names, stack traces, error codes, endpoints, \"console\", \"network tab\", \"browser\", or \"reproduce\". If someone's grandparent could not answer it, rewrite it. Ask what they saw, what they expected, or when it started - something answerable from memory in one line.\n\nBAD: \"What HTTP status did the checkout endpoint return?\"\nGOOD: \"When you tried to pay, did you see an error message, or did the page just not do anything?\"\n\nOne question only. They may not reply twice.\n",
+  "text": "{\"question\":\"What were you trying to do when you noticed something wasn't working, and what happened instead?\",\"why_it_matters\":\"We need to know the specific action and what went wrong to locate and fix the problem.\",\"unblocks_field\":\"steps\"}",
+  "usage": {
+    "calls": 1,
+    "input_tokens": 529,
+    "output_tokens": 77,
+    "usd": 0.000914
+  },
+  "user": "{\"report\": {\"raw_text\": \"it's broken, please fix\", \"channel\": \"email\", \"reporter_name\": null, \"repo_path\": \"fixtures/demo_repos/notekeeper\"}, \"facts\": {\"observed_behaviour\": \"it's broken\", \"expected_behaviour\": null, \"steps\": [], \"entrypoint_hint\": null, \"environment\": null, \"missing\": [\"observed_behaviour\", \"steps\"], \"confidence\": 0.15}, \"missing\": [\"observed_behaviour\", \"steps\"]}"
+}

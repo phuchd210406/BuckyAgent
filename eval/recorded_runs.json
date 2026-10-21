@@ -1,14 +1,16 @@
 {
-  "model_id": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+  "model_id": "claude-haiku-4-5",
+  "provider": "anthropic",
   "recorded_at": "2026-01-01T00:00:00+00:00",
-  "region": "us-east-1",
+  "region": null,
   "runs": [
     {
-      "accepted_patches": [],
+      "accepted_patches": [
+        "--- a/shopcart/pricing.py\n+++ b/shopcart/pricing.py\n@@ -37,7 +37,7 @@ def shipping_for(subtotal: float) -> float:\n \n def total(lines: list[Line], promo: str | None = None) -> float:\n     subtotal = sum(line.subtotal for line in lines)\n     discounted = apply_promo(subtotal, promo)\n-    return round(discounted + shipping_for(discounted), 2)\n+    return round(discounted + shipping_for(subtotal), 2)\n"
+      ],
       "case_id": "shopcart-free-shipping",
       "error": null,
       "expected_verdict": "reproduced_and_fixed",
-      "recorded_verdict": "reproduced_not_fixed",
       "report": {
         "channel": "email",
         "raw_text": "hi, i tried to buy stuff this morning and it charged me postage even though the site says free postage over $50. my basket was definitely more than $50. can you sort it out, we have customers complaining",
@@ -17,10 +19,143 @@
         "reporter_name": null,
         "run_id": "shopcart-free-shipping"
       },
-      "rescored_note": "Recorded as reproduced_not_fixed. Its only 'reproduction' called shipping_for(subtotal=55.0, discount=5.50), and shipping_for takes no discount: the test failed with TypeError on its own mistake. agents._common.broken_test_reason now scores that as a broken test, so replaying the same replies gives not_reproduced. The TestArtifact cassette was re-keyed, not re-recorded; the Handover was dropped because its letter was written for the old verdict. Run `make record` to replace both.",
-      "usd": 0.014147,
+      "usd": 0.01064,
+      "verdict": "reproduced_and_fixed"
+    },
+    {
+      "accepted_patches": [],
+      "case_id": "subscriptions-month-end-renewal",
+      "error": null,
+      "expected_verdict": "reproduced_and_fixed",
+      "report": {
+        "channel": "email",
+        "raw_text": "some customers didn't get charged at the end of january and finance only spotted it last week. it's not everyone, most people renewed fine. someone here reckons it's a leap year thing. we also switched to the new invoice template around then if that's relevant. this is the second month running now and it's the same handful of people",
+        "received_at": "2026-01-01T00:00:00Z",
+        "repo_path": "fixtures/demo_repos/subscriptions",
+        "reporter_name": null,
+        "run_id": "subscriptions-month-end-renewal"
+      },
+      "usd": 0.018563,
+      "verdict": "not_reproduced"
+    },
+    {
+      "accepted_patches": [
+        "--- a/helpdesk/tickets.py\n+++ b/helpdesk/tickets.py\n@@ -32,8 +32,7 @@ def page_slice(\n ) -> list[Ticket]:\n     \"\"\"The tickets shown on `page`, counting from 1.\"\"\"\n     if page < 1:\n         raise ValueError(\"page numbering starts at 1\")\n     start = (page - 1) * per_page\n-    # DEMO BUG #3: `end` is computed as an INCLUSIVE index but handed to a\n-    # slice, which is exclusive. Every page is one ticket short, and the ticket\n-    # that falls off is not pushed onto the next page -- page 2 starts after\n-    # it. It exists, it is findable by reference, and it is on no page at all.\n-    end = start + per_page - 1\n+    end = start + per_page\n     return tickets[start:end]"
+      ],
+      "case_id": "helpdesk-missing-ticket",
+      "error": null,
+      "expected_verdict": "reproduced_and_fixed",
+      "report": {
+        "channel": "email",
+        "raw_text": "a customer rang up really annoyed because we never replied to her ticket. the ticket is definitely there, i can pull it up if i search her reference, but it is not in the list when you click through the pages. we counted and there are some missing every time you go to the next page. is the search index out of date or something? she's been with us nine years so this is not a great look",
+        "received_at": "2026-01-01T00:00:00Z",
+        "repo_path": "fixtures/demo_repos/helpdesk",
+        "reporter_name": null,
+        "run_id": "helpdesk-missing-ticket"
+      },
+      "usd": 0.01296,
+      "verdict": "reproduced_and_fixed"
+    },
+    {
+      "accepted_patches": [],
+      "case_id": "expenses-penny-short",
+      "error": null,
+      "expected_verdict": "reproduced_and_fixed",
+      "report": {
+        "channel": "email",
+        "raw_text": "we use this for the team lunch every friday and the kitty never quite adds up. we're a few pence short most weeks and by the end of the month it's noticeable enough that people have started joking about it. nobody is stealing it before you ask. might have started when we switched to the new place that does the wraps",
+        "received_at": "2026-01-01T00:00:00Z",
+        "repo_path": "fixtures/demo_repos/expenses",
+        "reporter_name": null,
+        "run_id": "expenses-penny-short"
+      },
+      "usd": 0.015297,
+      "verdict": "not_reproduced"
+    },
+    {
+      "accepted_patches": [
+        "--- a/leaderboard/standings.py\n+++ b/leaderboard/standings.py\n@@ -17,11 +17,7 @@ class Player:\n \n def rank(players: list[Player]) -> list[Player]:\n     \"\"\"Highest points first. Players level on points are ordered by name.\"\"\"\n-    by_name = sorted(players, key=lambda p: p.name)\n-    ordered = sorted(by_name, key=lambda p: p.points)\n-    # DEMO BUG #5: reversing the list to get \"highest first\" also reverses the\n-    # alphabetical tie-break established above, so players level on points come\n-    # out in the wrong order -- and in an order that changes with who else is\n-    # level that week. sorted(..., reverse=True) would have kept ties stable;\n-    # .reverse() on the finished list cannot tell a tie from a difference.\n-    ordered.reverse()\n+    ordered = sorted(players, key=lambda p: (-p.points, p.name))\n     return ordered\n"
+      ],
+      "case_id": "leaderboard-tied-points",
+      "error": null,
+      "expected_verdict": "reproduced_and_fixed",
+      "report": {
+        "channel": "email",
+        "raw_text": "the weekly board is putting people in the wrong order. me and dave finished on the same points this week and he's shown above me, but when me and adam tied last month i was the one on top. so it's not alphabetical and it's not whoever scored first either. the points themselves are all correct, it's just the order they come out in. a few of the lads have noticed and it makes the whole thing look made up",
+        "received_at": "2026-01-01T00:00:00Z",
+        "repo_path": "fixtures/demo_repos/leaderboard",
+        "reporter_name": null,
+        "run_id": "leaderboard-tied-points"
+      },
+      "usd": 0.013553,
+      "verdict": "reproduced_and_fixed"
+    },
+    {
+      "accepted_patches": [],
+      "case_id": "notekeeper-underspecified",
+      "error": null,
+      "expected_verdict": "needs_clarification",
+      "report": {
+        "channel": "email",
+        "raw_text": "it's broken, please fix",
+        "received_at": "2026-01-01T00:00:00Z",
+        "repo_path": "fixtures/demo_repos/notekeeper",
+        "reporter_name": null,
+        "run_id": "notekeeper-underspecified"
+      },
+      "usd": 0.002065,
+      "verdict": "needs_clarification"
+    },
+    {
+      "accepted_patches": [],
+      "case_id": "delivery-working-days",
+      "error": null,
+      "expected_verdict": "not_reproduced",
+      "report": {
+        "channel": "email",
+        "raw_text": "ordered something on the friday, the site said 3 days, it turned up the wednesday. that's five days not three. i'm not usually one to complain and the item itself is fine, my wife says i'm being fussy. but you shouldn't say 3 days if you mean 5. can you get the counter fixed",
+        "received_at": "2026-01-01T00:00:00Z",
+        "repo_path": "fixtures/demo_repos/delivery",
+        "reporter_name": null,
+        "run_id": "delivery-working-days"
+      },
+      "usd": 0.023128,
+      "verdict": "reproduced_not_fixed"
+    },
+    {
+      "accepted_patches": [
+        "--- a/dashboard/summary.py\n+++ b/dashboard/summary.py\n@@ -16,12 +16,12 @@ def summarise(text: str, limit: int = DEFAULT_LIMIT) -> str:\n     \"\"\"Shorten `text` to fit a card, without cutting a word in half.\"\"\"\n     text = \" \".join(text.split())\n     if len(text) <= limit:\n         return text\n-    # DEMO BUG #7: this searches FORWARD for the space after `limit`, so the\n-    # whole of the word straddling the boundary is kept and the preview runs\n-    # past the width the card was built for.\n+    # Find the last space at or before the limit to keep text within bounds\n+    # while avoiding cutting words in half. Search backward from the limit\n+    # to find a safe break point.\n     #\n     # Cutting at exactly `limit` is NOT the fix: test_words_are_never_cut_in_half\n     # is a real requirement, and a hard cut also has to keep working for a long\n     # string with no spaces in it at all.\n-    cut = text.find(\" \", limit)\n+    cut = text.rfind(\" \", 0, limit + 1)\n     if cut == -1:\n         cut = len(text)\n     return text[:cut] + ELLIPSIS\n"
+      ],
+      "case_id": "dashboard-preview-overflow",
+      "error": null,
+      "expected_verdict": "reproduced_and_fixed",
+      "report": {
+        "channel": "email",
+        "raw_text": "the text on the dashboard cards runs off the side and covers up the buttons so you can't click them. only happens on some of the cards, i think the ones with longer titles. we had a client in on friday and it did it in front of them which was embarrassing. can you make the boxes wider",
+        "received_at": "2026-01-01T00:00:00Z",
+        "repo_path": "fixtures/demo_repos/dashboard",
+        "reporter_name": null,
+        "run_id": "dashboard-preview-overflow"
+      },
+      "usd": 0.014073,
+      "verdict": "reproduced_and_fixed"
+    },
+    {
+      "accepted_patches": [],
+      "case_id": "statusboard-client-network",
+      "error": null,
+      "expected_verdict": "not_reproduced",
+      "report": {
+        "channel": "email",
+        "raw_text": "everything has been really slow for me since tuesday, sometimes it just sits there and then says it can't connect and i have to refresh three or four times before it comes up. nobody else in the office seems to be getting it which is the odd part. we did have someone in to redo the wifi on the monday. i'm not being funny but it was fine before you did that update last week",
+        "received_at": "2026-01-01T00:00:00Z",
+        "repo_path": "fixtures/demo_repos/statusboard",
+        "reporter_name": null,
+        "run_id": "statusboard-client-network"
+      },
+      "usd": 0.013768,
       "verdict": "not_reproduced"
     }
   ],
-  "total_usd": 0.014147
+  "total_usd": 0.124047
 }

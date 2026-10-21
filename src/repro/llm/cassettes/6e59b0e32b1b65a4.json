@@ -1,0 +1,14 @@
+{
+  "raw_text": "```json\n{\n  \"observed_behaviour\": \"Ordered on Friday with a stated 3-day delivery estimate, but the item arrived on Wednesday (5 days later).\",\n  \"expected_behaviour\": \"Item should arrive in 3 days as stated.\",\n  \"steps\": [\n    \"Placed order on Friday\",\n    \"Received item on Wednesday\"\n  ],\n  \"entrypoint_hint\": \"delivery estimate counter\",\n  \"environment\": null,\n  \"missing\": [],\n  \"confidence\": 0.92\n}\n```",
+  "schema": "ReportFacts",
+  "stop_reason": "end_turn",
+  "system": "You turn a client's bug report into structured facts: a stenographer, not an analyst.\n\nRecord only what the reporter SAID; if they did not say it, it is not a fact:\n- they never stated what they expected -> expected_behaviour null;\n- steps hold only actions they described, never the obvious intermediate step.\n\nmissing holds names of fields in THIS schema and nothing else. It STOPS the run to ask the client a question, so name a field only if a developer could not begin without it. A field you filled is never missing. Usually empty.\n\nOne invented step sends every later stage after the wrong code; ~12% of LLM bug-report summaries contain fabrications. Prefer null to a guess.\n\nExample - \"the app is broken, i cant sign in\": observed_behaviour \"cannot sign in\"; expected_behaviour null; steps [\"tried to sign in\"] NOT [\"entered password\",\"clicked submit\"]; missing [].\n",
+  "text": "{\"observed_behaviour\":\"Ordered on Friday with a stated 3-day delivery estimate, but the item arrived on Wednesday (5 days later).\",\"expected_behaviour\":\"Item should arrive in 3 days as stated.\",\"steps\":[\"Placed order on Friday\",\"Received item on Wednesday\"],\"entrypoint_hint\":\"delivery estimate counter\",\"environment\":null,\"missing\":[],\"confidence\":0.92}",
+  "usage": {
+    "calls": 1,
+    "input_tokens": 826,
+    "output_tokens": 128,
+    "usd": 0.001466
+  },
+  "user": "{\"report\": {\"raw_text\": \"ordered something on the friday, the site said 3 days, it turned up the wednesday. that's five days not three. i'm not usually one to complain and the item itself is fine, my wife says i'm being fussy. but you shouldn't say 3 days if you mean 5. can you get the counter fixed\", \"channel\": \"email\", \"reporter_name\": null, \"repo_path\": \"fixtures/demo_repos/delivery\"}}"
+}

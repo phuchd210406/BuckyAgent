@@ -1,0 +1,155 @@
+From 9f485a49b65f23f06868a1859c37ce5dc5f40be2 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 21 Oct 2026 14:46:40 +0800
+Subject: [PATCH] fix(record): record cassettes from the Anthropic API, not
+ only Bedrock
+
+`make record` hard-wired BedrockLLM, so a machine with only an Anthropic
+API key failed every case with NoCredentialsError. It then overwrote
+eval/recorded_runs.json with nine failures, which breaks the replay test.
+
+- `make record PROVIDER=anthropic` (or --provider) records through
+  AnthropicLLM, with the same per-run and session budget guards.
+- The manifest is left alone when every case failed.
+- The manifest now records which provider made it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01KGsvdpLJ4ZoDJvjm8iGWHZ
+---
+ Makefile                    |  5 +++--
+ docs/DEPLOY.md              |  2 +-
+ scripts/record_cassettes.py | 42 +++++++++++++++++++++++++++++++------
+ 3 files changed, 40 insertions(+), 9 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 01ee057..8bc0bcb 100644
+--- a/Makefile
++++ b/Makefile
+@@ -48,8 +48,9 @@ ifndef REPO
+ endif
+ 	$(PY) -m repro.cli run --repo-url "$(REPO)" --report "$(REPORT)" -v
+ 
+-record:                   ## Re-record cassettes against real Bedrock (COSTS MONEY)
+-	REPRO_RECORD=1 LLM_PROVIDER=bedrock $(PY) scripts/record_cassettes.py
++PROVIDER ?= bedrock
++record:                   ## Re-record cassettes (COSTS MONEY). PROVIDER=anthropic for an API key
++	REPRO_RECORD=1 LLM_PROVIDER=$(PROVIDER) $(PY) scripts/record_cassettes.py --provider $(PROVIDER)
+ 
+ eval:                     ## Score the golden dataset by RUNNING the agent (free, replayed)
+ 	LLM_PROVIDER=fake $(PY) eval/run_eval.py --dataset eval/dataset.yaml
+diff --git a/docs/DEPLOY.md b/docs/DEPLOY.md
+index 16cb743..d91d7f5 100644
+--- a/docs/DEPLOY.md
++++ b/docs/DEPLOY.md
+@@ -84,7 +84,7 @@ Only Engineer C, and only while recording cassettes, should have `REPRO_RECORD=1
+ export AWS_ACCESS_KEY_ID=...      # fresh from the access portal
+ export AWS_SECRET_ACCESS_KEY=...
+ export AWS_SESSION_TOKEN=...
+-REPRO_RECORD=1 LLM_PROVIDER=bedrock make record
++make record                      # Bedrock; or: make record PROVIDER=anthropic
+ git add src/repro/llm/cassettes && git commit -m "record cassettes"
+ ```
+ 
+diff --git a/scripts/record_cassettes.py b/scripts/record_cassettes.py
+index f729548..297590a 100644
+--- a/scripts/record_cassettes.py
++++ b/scripts/record_cassettes.py
+@@ -1,7 +1,8 @@
+ #!/usr/bin/env python3
+ """Record cassettes from a real Bedrock run of the golden dataset. OWNER: Engineer C (C4).
+ 
+-    REPRO_RECORD=1 LLM_PROVIDER=bedrock make record        # COSTS MONEY
++    make record                          # Bedrock          COSTS MONEY
++    make record PROVIDER=anthropic       # Anthropic API    COSTS MONEY
+ 
+ Runs every case in eval/dataset.yaml end to end against real Bedrock -- real
+ workspace, real pytest, real patcher -- and writes:
+@@ -76,6 +77,17 @@ def report_for(case: dict):
+     )
+ 
+ 
++def new_client(provider: str, budget):
++    """A real client for one case. Both carry the per-run budget guard."""
++    if provider == "anthropic":
++        from repro.llm.anthropic_api import AnthropicLLM
++
++        return AnthropicLLM(budget=budget)
++    from repro.llm.bedrock import BedrockLLM
++
++    return BedrockLLM(budget=budget)
++
++
+ def main(argv: list[str] | None = None) -> int:
+     ap = argparse.ArgumentParser(description=__doc__)
+     ap.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
+@@ -84,6 +96,12 @@ def main(argv: list[str] | None = None) -> int:
+     ap.add_argument("--session-budget", type=float, default=0.50,
+                     help="Hard stop for the whole recording, in USD (default 0.50).")
+     ap.add_argument("--dry-run", action="store_true", help="List what would be recorded.")
++    ap.add_argument(
++        "--provider",
++        choices=("bedrock", "anthropic"),
++        default=None,
++        help="Which real model to record from (default: LLM_PROVIDER, else bedrock).",
++    )
+     args = ap.parse_args(argv)
+ 
+     note = load_env()
+@@ -95,11 +113,15 @@ def main(argv: list[str] | None = None) -> int:
+ 
+     from repro.contracts import MAX_RUN_USD
+     from repro.graph.build import run
+-    from repro.llm.bedrock import BedrockLLM, RecordingLLM
++    from repro.llm.bedrock import RecordingLLM
+     from repro.llm.budget import BudgetExceeded, BudgetGuard, session_guard
+     from repro.settings import settings
+ 
+     cfg = settings()
++    provider = args.provider or os.environ.get("LLM_PROVIDER", "").strip().lower()
++    if provider not in ("bedrock", "anthropic"):
++        provider = "bedrock"
++    model_id = cfg.anthropic_model_id if provider == "anthropic" else cfg.model_id
+     cases = yaml.safe_load(args.dataset.read_text())["cases"]
+     if args.case:
+         cases = [c for c in cases if c["id"] in set(args.case)]
+@@ -109,7 +131,8 @@ def main(argv: list[str] | None = None) -> int:
+ 
+     cassette_dir = REPO_ROOT / cfg.cassette_dir
+     print(f"config     {note}")
+-    print(f"model      {cfg.model_id}   region {cfg.region}")
++    where = "Anthropic API" if provider == "anthropic" else f"Bedrock, region {cfg.region}"
++    print(f"model      {model_id}   via {where}")
+     print(f"cassettes  {cassette_dir}")
+     print(f"budget     ${MAX_RUN_USD:.2f}/run, ${args.session_budget:.2f} for this session")
+     print(f"cases      {len(cases)}: {', '.join(c['id'] for c in cases)}\n")
+@@ -123,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
+ 
+     for case in cases:
+         report = report_for(case)
+-        client = BedrockLLM(budget=BudgetGuard(label=report.run_id))
++        client = new_client(provider, BudgetGuard(label=report.run_id))
+         llm = RecordingLLM(client, cassette_dir=cassette_dir, enabled=True)
+ 
+         started = time.monotonic()
+@@ -164,10 +187,17 @@ def main(argv: list[str] | None = None) -> int:
+             "usd": round(cost, 6),
+         })
+ 
++    if records and all(r["error"] for r in records):
++        # Nothing was recorded, so the manifest the replay tests read would be
++        # replaced by one that lists only failures. Keep the old one.
++        print(f"\nevery case failed: {args.out} left as it was")
++        return 1
++
+     args.out.parent.mkdir(parents=True, exist_ok=True)
+     args.out.write_text(json.dumps({
+-        "model_id": cfg.model_id,
+-        "region": cfg.region,
++        "model_id": model_id,
++        "provider": provider,
++        "region": cfg.region if provider == "bedrock" else None,
+         "recorded_at": RECORDED_AT.isoformat(),
+         "total_usd": round(spent, 6),
+         "runs": records,
+-- 
+2.43.0

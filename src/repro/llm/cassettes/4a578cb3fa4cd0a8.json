@@ -1,0 +1,14 @@
+{
+  "raw_text": "```json\n{\n  \"file_path\": \"kitty/calculation.py\",\n  \"symbol\": null,\n  \"rationale\": \"The client reports the 'kitty is short by a few pence most weeks, accumulating noticeably by month end,' suggesting a rounding or precision error in expense tracking. Without code visibility, the most likely culprit is floating-point arithmetic in kitty calculation logic that loses precision across repeated weekly transactions.\",\n  \"confidence\": 0.25\n}\n```",
+  "schema": "Hypothesis",
+  "stop_reason": "end_turn",
+  "system": "Name the one place in the code that best explains what the client observed.\n\nYou get the extracted facts and snippets found by local search. Choose the snippet whose code most directly PRODUCES the observed behaviour - not the most interesting code, not the code most in need of tidying.\n\nCopy file_path exactly from the hit you chose. Never propose a fix, that is a later step. If nothing explains the report, take the closest hit and set confidence below 0.3 rather than manufacture certainty.\n\nrationale is two sentences: the first quotes the client's own words, the second names the line or condition that produces them. Example:\n\"The client was 'charged postage even though the site says free postage over $50'. shipping_for compares that threshold against the already-discounted subtotal, so a $55 basket with a promo falls under $50 and is charged.\"\n",
+  "text": "{\"file_path\":\"kitty/calculation.py\",\"symbol\":null,\"rationale\":\"The client reports the 'kitty is short by a few pence most weeks, accumulating noticeably by month end,' suggesting a rounding or precision error in expense tracking. Without code visibility, the most likely culprit is floating-point arithmetic in kitty calculation logic that loses precision across repeated weekly transactions.\",\"confidence\":0.25}",
+  "usage": {
+    "calls": 1,
+    "input_tokens": 563,
+    "output_tokens": 115,
+    "usd": 0.001138
+  },
+  "user": "{\"facts\": {\"observed_behaviour\": \"Team lunch kitty is short by a few pence most weeks, accumulating noticeably by month end.\", \"expected_behaviour\": \"Kitty should add up correctly.\", \"steps\": [\"Used kitty for team lunch every Friday\", \"Switched to new place that does wraps\"], \"entrypoint_hint\": \"expense tracking or kitty calculation\", \"environment\": null, \"missing\": [\"expected_behaviour\"], \"confidence\": 0.72}, \"hits\": []}"
+}
